@@ -103,6 +103,38 @@ static dissector_handle_t nvmet_tcp_handle;
 //    { NVME_FCTYPE_AUTH_RECV,     "Authentication Recv"},
 //    { 0, NULL}
 //};
+
+enum nvme_tcp_pdu_type {
+	nvme_tcp_icreq		= 0x0,
+	nvme_tcp_icresp		= 0x1,
+	nvme_tcp_h2c_term	= 0x2,
+	nvme_tcp_c2h_term	= 0x3,
+	nvme_tcp_cmd		= 0x4,
+	nvme_tcp_rsp		= 0x5,
+	nvme_tcp_h2c_data	= 0x6,
+	nvme_tcp_c2h_data	= 0x7,
+	nvme_tcp_r2t		= 0x9,
+};
+
+static const value_string nvme_tcp_pdu_type_vals[] = {
+  { nvme_tcp_icreq,       "ICREQ"},
+  { nvme_tcp_icresp,      "ICRESP"},
+  { nvme_tcp_h2c_term,    "H2CTerm "},
+  { nvme_tcp_c2h_term,    "C2HTerm"},
+  { nvme_tcp_cmd,    	  "Command"},
+  { nvme_tcp_rsp,    	  "Response"},
+  { nvme_tcp_h2c_data,    "H2CData"},
+  { nvme_tcp_c2h_data,    "C2HData"},
+  { nvme_tcp_r2t,    	  "Ready To Transmit"},
+  { 0, NULL }
+};
+
+enum nvme_tcp_digest_option {
+	NVME_TCP_HDR_DIGEST_ENABLE	= (1 << 0),
+	NVME_TCP_DATA_DIGEST_ENABLE	= (1 << 1),
+};
+
+
 //
 //static const value_string prop_offset_tbl[] = {
 //    { 0x0,      "Controller Capabilities"},
@@ -129,11 +161,35 @@ static dissector_handle_t nvmet_tcp_handle;
 //};
 //
 struct nvme_tcp_q_ctx {
+    gboolean	      hdr_digest;
+    gboolean	      data_digest;
     struct nvme_q_ctx n_q_ctx;
 };
 
-
+static int hf_nvme_tcp_type = -1;
+static int hf_nvme_tcp_flags = -1;
+static int hf_nvme_tcp_hlen = -1;
+static int hf_nvme_tcp_pdo = -1;
 static int hf_nvme_tcp_plen = -1;
+
+
+/* NVMe tcp icreq/icresp fields */
+static int hf_nvme_tcp_icreq = -1;
+static int hf_nvme_tcp_icreq_pfv  = -1;
+static int hf_nvme_tcp_icreq_maxr2t  = -1;
+static int hf_nvme_tcp_icreq_hpda  = -1;
+// FIXME: split digest into 2 header and data
+static int hf_nvme_tcp_icreq_digest  = -1;
+static int hf_nvme_tcp_icresp = -1;
+static int hf_nvme_tcp_icresp_pfv = -1;
+static int hf_nvme_tcp_icresp_cpda = -1;
+static int hf_nvme_tcp_icresp_digest = -1;
+static int hf_nvme_tcp_icresp_maxdata = -1;
+
+
+
+
+
 
 //
 //struct nvme_rdma_cmd_ctx {
@@ -230,6 +286,8 @@ static int hf_nvme_tcp_plen = -1;
 //static gint ett_data = -1;
 //
 static gint ett_nvme_tcp = -1;
+static gint ett_nvmet_tcp_icqreq = -1;
+static gint ett_nvmet_tcp_icqresp = -1;
 static range_t *gPORT_RANGE;
 //
 //static conversation_infiniband_data *get_conversion_data(conversation_t *conv)
@@ -924,12 +982,85 @@ get_nvme_tcp_pdu_len(packet_info *pinfo __attribute__((unused)), tvbuff_t *tvb _
 }
 
 static int
+nvme_tcp_dissect_icreq(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), int offset,
+		       proto_tree *tree, struct nvme_tcp_q_ctx *queue) {
+
+	proto_item *tf;
+	proto_item *icreq_tree;
+	guint       digest;
+	// FIXME: should we set queue state here ?? Set connection state ????
+
+
+	tf = proto_tree_add_item(tree, hf_nvme_tcp_icreq, tvb, offset, -1, ENC_NA);
+	icreq_tree = proto_item_add_subtree(tf, ett_nvmet_tcp_icqreq);
+
+	//col_append_fstr(pinfo->cinfo, COL_INFO, " proto=%d", protocol) ;
+
+
+	proto_tree_add_item(icreq_tree, hf_nvme_tcp_icreq_pfv, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+	offset += 2;
+	proto_tree_add_item(icreq_tree, hf_nvme_tcp_icreq_maxr2t, tvb, offset, 4, ENC_LITTLE_ENDIAN);
+	offset += 4;
+	proto_tree_add_item(icreq_tree, hf_nvme_tcp_icreq_hpda, tvb, offset, 1, ENC_NA);
+	offset += 1;
+	digest = tvb_get_guint8(tvb, offset);
+	proto_tree_add_item(icreq_tree, hf_nvme_tcp_icreq_digest, tvb, offset, 1, ENC_NA);
+	offset += 1;
+
+	queue->hdr_digest = !!(digest & NVME_TCP_HDR_DIGEST_ENABLE);
+	queue->data_digest = !!(digest & NVME_TCP_DATA_DIGEST_ENABLE);
+
+	// FIXME: should i register queue here???
+
+	/* This is a "spare" field */
+	offset += 112;
+	return offset;
+}
+
+
+static int
+nvme_tcp_dissect_icresp(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), int offset,
+		        proto_tree *tree, struct nvme_tcp_q_ctx *queue __attribute__((unused))) {
+
+	proto_item *tf;
+	proto_item *icresp_tree;
+
+	// FIXME: should we set queue state here ?? Set connection state ????
+
+
+	tf = proto_tree_add_item(tree, hf_nvme_tcp_icresp, tvb, offset, -1, ENC_NA);
+	icresp_tree = proto_item_add_subtree(tf, ett_nvmet_tcp_icqresp);
+
+	//col_append_fstr(pinfo->cinfo, COL_INFO, " proto=%d", protocol) ;
+
+
+	proto_tree_add_item(icresp_tree, hf_nvme_tcp_icresp_pfv, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+	offset += 2;
+	proto_tree_add_item(icresp_tree, hf_nvme_tcp_icresp_cpda, tvb, offset, 1, ENC_NA);
+	offset += 1;
+	proto_tree_add_item(icresp_tree, hf_nvme_tcp_icresp_digest, tvb, offset, 1, ENC_NA);
+	offset += 1;
+	proto_tree_add_item(icresp_tree, hf_nvme_tcp_icresp_maxdata, tvb, offset, 4, ENC_LITTLE_ENDIAN);
+	offset += 4;
+
+	// FIXME: now adjust data and header digest according to response
+
+	/* This is a "spare" field */
+	offset += 112;
+	return offset;
+}
+
+
+static int
 dissect_nvme_tcp_pdu(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), proto_tree *tree __attribute__((unused)), void* data _U_ __attribute__((unused))) {
 	conversation_t  *conversation;
 	struct nvme_tcp_q_ctx *q_ctx;
 	proto_item      *ti;
 	int             offset = 0;
-	proto_tree *nvme_tree;
+	proto_tree      *nvme_tree;
+	guint           packet_type;
+	//guint           pdo;
+	//guint32         payload_data_len;
 
 	conversation = find_or_create_conversation(pinfo);
 	q_ctx = (struct nvme_tcp_q_ctx *)conversation_get_proto_data(conversation, proto_nvme_tcp);
@@ -952,13 +1083,50 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), 
 	ti = proto_tree_add_item(tree, proto_nvme_tcp, tvb, 0, -1, ENC_NA);
 	nvme_tree = proto_item_add_subtree(ti, ett_nvme_tcp);
 
-	// 4 is the start of plen
-	proto_tree_add_item(nvme_tree, hf_nvme_tcp_plen, tvb, offset + 4, 3, ENC_LITTLE_ENDIAN);
 
+	packet_type = tvb_get_guint8(tvb, offset);
+	proto_tree_add_item(nvme_tree, hf_nvme_tcp_type, tvb, offset, 1, ENC_NA);
+	offset+=1;
+	proto_tree_add_item(nvme_tree, hf_nvme_tcp_flags, tvb, offset, 1, ENC_NA);
+	offset+=1;
+	proto_tree_add_item(nvme_tree, hf_nvme_tcp_hlen, tvb, offset, 1, ENC_NA);
+	offset+=1;
+	//pdo = tvb_get_guint8(tvb, offset);
+	proto_tree_add_item(nvme_tree, hf_nvme_tcp_pdo, tvb, offset, 1, ENC_NA);
+	offset+=1;
+	proto_tree_add_item(nvme_tree, hf_nvme_tcp_plen, tvb, offset, 4, ENC_LITTLE_ENDIAN);
+	offset+=4;
 	col_set_str(pinfo->cinfo, COL_PROTOCOL, NVME_FABRICS_TCP);
 
-	//nvme_publish_qid(nvme_tree, hf_nvme_rdma_cmd_qid, q_ctx->n_q_ctx.qid);
+	//
+	//offset += (pdo - 8);
 
+	//nvme_publish_qid(nvme_tree, hf_nvme_rdma_cmd_qid, q_ctx->n_q_ctx.qid);
+	/* When we get here offset points directly after tcp header */
+
+	switch (packet_type) {
+	case nvme_tcp_icreq:
+		col_set_str(pinfo->cinfo, COL_INFO, "Connect Request");
+		offset = nvme_tcp_dissect_icreq(tvb, pinfo, offset, nvme_tree, q_ctx);
+		break;
+	case nvme_tcp_icresp:
+		col_set_str(pinfo->cinfo, COL_INFO, "Connect Response");
+		offset = nvme_tcp_dissect_icresp(tvb, pinfo, offset, nvme_tree, q_ctx);
+		break;
+	default:
+		printf("Error in parsing...\n");
+		// FIXME: add here error info
+
+	}
+
+	//osset +=
+
+	/* remaining payload indicates an error */
+	if (tvb_reported_length_remaining(tvb, offset) > 0) {
+		/*ti = proto_tree_add_item(mysql_tree, hf_mysql_payload, tvb, offset, -1, ENC_NA);
+		expert_add_info(pinfo, ti, &ei_mysql_dissector_incomplete);*/
+		printf("%s:%d ERROR!!! remaining in parsing %d\n", __FILE__, __LINE__, tvb_reported_length_remaining(tvb, offset));
+	}
 
 	return tvb_reported_length(tvb);
 }
@@ -1013,11 +1181,79 @@ proto_register_nvme_tcp(void)
      module_t *nvme_tcp_module;
      //expert_module_t* expert_nvme_tcp;
      static hf_register_info hf[] = {
+	     { &hf_nvme_tcp_type,
+	         { "Pdu Type", "nvme-tcp.type",
+	               FT_UINT8, BASE_DEC, VALS (nvme_tcp_pdu_type_vals),  0x0,
+				NULL, HFILL }},
+	     { &hf_nvme_tcp_flags,
+			 { "Pdu Specific Flags", "nvme-tcp.flags",
+			       FT_UINT8, BASE_DEC, NULL,  0x0,
+					NULL, HFILL }},
+    	     { &hf_nvme_tcp_hlen,
+		 { "Pdu Header Length", "nvme-tcp.hlen",
+		       FT_UINT8, BASE_DEC, NULL,  0x0,
+				NULL, HFILL }},
+	     { &hf_nvme_tcp_pdo,
+			 { "Pdu Data Offset", "nvme-tcp.pdo",
+			       FT_UINT8, BASE_DEC, NULL,  0x0,
+					NULL, HFILL }},
 	     { &hf_nvme_tcp_plen,
 	         { "Packet Length", "nvme-tcp.plen",
 	                FT_UINT32, BASE_DEC, NULL,  0x0,
 			NULL, HFILL }},
+
+	     { &hf_nvme_tcp_icreq,
+			{ "Initial Connect Request", "nvme-tcp.icreq",
+			FT_NONE, BASE_NONE, NULL, 0x0,
+			NULL, HFILL }},
+
+	     { &hf_nvme_tcp_icreq_pfv,
+			 { "Pdu Version Format", "nvme-tcp.icreq.pfv",
+				FT_UINT16, BASE_DEC, NULL,  0x0,
+				NULL, HFILL }},
+
+	    { &hf_nvme_tcp_icreq_maxr2t,
+				 { "Maximum r2ts per request", "nvme-tcp.icreq.maxr2t",
+					FT_UINT32, BASE_DEC, NULL,  0x0,
+					NULL, HFILL }},
+
+  	    { &hf_nvme_tcp_icreq_hpda,
+			{ "Host Pdu data alignment", "nvme-tcp.icreq.hpda",
+			FT_UINT8, BASE_DEC, NULL,  0x0,
+				NULL, HFILL }},
+
+            { &hf_nvme_tcp_icreq_digest,
+			{ "Digest Types Enabled", "nvme-tcp.icreq.digest",
+			FT_UINT8, BASE_DEC, NULL,  0x0,
+				NULL, HFILL }},
+
+	    { &hf_nvme_tcp_icresp,
+				{ "Initial Connect Response", "nvme-tcp.icresp",
+				FT_NONE, BASE_NONE, NULL, 0x0,
+				NULL, HFILL }},
+
+	    { &hf_nvme_tcp_icresp_pfv,
+				 { "Pdu Version Format", "nvme-tcp.icresp.pfv",
+					FT_UINT16, BASE_DEC, NULL,  0x0,
+					NULL, HFILL }},
+
+	    { &hf_nvme_tcp_icresp_cpda,
+				 { "Controller Pdu data alignment", "nvme-tcp.icresp.cpda",
+					FT_UINT32, BASE_DEC, NULL,  0x0,
+					NULL, HFILL }},
+
+	    { &hf_nvme_tcp_icresp_digest,
+			{ "Digest types enabled", "nvme-tcp.icresp.digest",
+			FT_UINT8, BASE_DEC, NULL,  0x0,
+				NULL, HFILL }},
+
+	    { &hf_nvme_tcp_icresp_maxdata,
+			{ "Maximum data capsules per r2t supported", "nvme-tcp.icresp.maxdata",
+			FT_UINT8, BASE_DEC, NULL,  0x0,
+				NULL, HFILL }},
+
      };
+
 //    static hf_register_info hf[] = {
 //        /* IB RDMA CM fields */
 //        { &hf_nvme_rdma_cm_req_recfmt,
@@ -1273,6 +1509,8 @@ proto_register_nvme_tcp(void)
 //    };
     static gint *ett[] = {
         &ett_nvme_tcp,
+	&ett_nvmet_tcp_icqreq,
+	&ett_nvmet_tcp_icqresp
     };
 //
      proto_nvme_tcp = proto_register_protocol("NVM Express Fabrics TCP",
@@ -1280,6 +1518,10 @@ proto_register_nvme_tcp(void)
 
      proto_register_field_array (proto_nvme_tcp, hf, array_length (hf));
      proto_register_subtree_array (ett, array_length (ett));
+
+//     tf = proto_tree_add_item(tree, hf_mysql_server_greeting, tvb, offset, -1, ENC_NA);
+//     greeting_tree = proto_item_add_subtree(tf, ett_server_greeting);
+
 
 //
 //    proto_register_field_array(proto_nvme_rdma, hf, array_length(hf));
