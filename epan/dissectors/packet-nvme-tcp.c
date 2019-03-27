@@ -1476,19 +1476,6 @@ dissect_nvme_tcp_command(tvbuff_t *tvb, packet_info *pinfo, int offset,
 		                   &cmd_ctx->n_cmd_ctx);
 		// FIXME: Interesting what to do here ??? should i parse data or somethinh ??
 	}
-
-	// NVME COMMAND IS 64 ...
-
-//	    } else {
-//	        cmd_ctx->n_cmd_ctx.fabric = FALSE;
-//	        dissect_nvme_cmd(nvme_tvb, pinfo, root_tree, &q_ctx->n_q_ctx,
-//	                         &cmd_ctx->n_cmd_ctx);
-//	        if (cmd_ctx->n_cmd_ctx.remote_key) {
-//	            nvme_add_data_request(pinfo, &q_ctx->n_q_ctx,
-//	                                  &cmd_ctx->n_cmd_ctx, (void*)cmd_ctx);
-//	        }
-	//}
-
 }
 
 
