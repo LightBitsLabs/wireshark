@@ -276,7 +276,6 @@ static int hf_nvme_fabrics_cmd_connect_data_rsvd5 = -1;
 
 
 
-
 //static int hf_nvme_fabrics_cmd_connect_rsvd1 = -1;
 //static int hf_nvme_fabrics_cmd_connect_rsvd1 = -1;
 
@@ -328,6 +327,12 @@ static int hf_nvme_fabrics_cmd_prop_attr_rsvd2 = -1;
 static int hf_nvme_fabrics_cmd_prop_attr_offset = -1;
 static int hf_nvme_fabrics_cmd_prop_attr_rsvd3 = -1;
 static int hf_nvme_fabrics_cmd_prop_attr_get_rsvd4 = -1;
+static int hf_nvme_fabrics_cmd_prop_attr_set_4B_value = -1;
+static int hf_nvme_fabrics_cmd_prop_attr_set_4B_value_rsvd = -1;
+static int hf_nvme_fabrics_cmd_prop_attr_set_8B_value = -1;
+static int hf_nvme_fabrics_cmd_prop_attr_set_rsvd3 = -1;
+
+
 
 
 //static int hf_nvme_rdma_cmd_prop_attr_set_4B_value = -1;
@@ -1328,6 +1333,27 @@ static void dissect_nvme_fabric_prop_get_cmd(proto_tree *cmd_tree, tvbuff_t *cmd
 }
 
 
+static void dissect_nvme_fabric_prop_set_cmd(proto_tree *cmd_tree, tvbuff_t *cmd_tvb, int offset)
+{
+    guint8 attr;
+
+
+    attr = dissect_nvme_fabric_prop_cmd_common(cmd_tree, cmd_tvb, offset);
+    if (attr == 0) {
+        proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_prop_attr_set_4B_value, cmd_tvb,
+                            offset + 48, 4, ENC_LITTLE_ENDIAN);
+        proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_prop_attr_set_4B_value_rsvd, cmd_tvb,
+                            offset + 52, 4, ENC_LITTLE_ENDIAN);
+    } else {
+	// FIXME: currently we dont have controller configuration settings
+	// as human readable strings .. need to work on it
+        proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_prop_attr_set_8B_value, cmd_tvb,
+                            offset + 48, 8, ENC_LITTLE_ENDIAN);
+    }
+    proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_prop_attr_set_rsvd3, cmd_tvb,
+                        offset + 56, 8, ENC_NA);
+}
+
 static void
 dissect_nvme_fabric_cmd(tvbuff_t *nvme_tvb, proto_tree *nvme_tree,
                         struct nvme_tcp_cmd_ctx *cmd_ctx, int offset)
@@ -1372,9 +1398,9 @@ dissect_nvme_fabric_cmd(tvbuff_t *nvme_tvb, proto_tree *nvme_tree,
     case nvme_fabrics_type_property_get:
         dissect_nvme_fabric_prop_get_cmd(cmd_tree, nvme_tvb, offset);
         break;
-//    case NVME_FCTYPE_PROP_SET:
-//        dissect_nvme_fabric_prop_set_cmd(cmd_tree, nvme_tvb);
-//        break;
+    case nvme_fabrics_type_property_set:
+        dissect_nvme_fabric_prop_set_cmd(cmd_tree, nvme_tvb, offset);
+        break;
 //    case NVME_FCTYPE_AUTH_RECV:
     default:
         dissect_nvme_fabric_generic_cmd(cmd_tree, nvme_tvb, offset);
@@ -1983,23 +2009,23 @@ proto_register_nvme_tcp(void)
         { &hf_nvme_fabrics_cmd_prop_attr_get_rsvd4,
             { "Reserved", "nvme-tcp.cmd.prop_attr.get.rsvd4",
                FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
-        }
-//        { &hf_nvme_rdma_cmd_prop_attr_set_4B_value,
-//            { "Value", "nvme-rdma.cmd.prop_attr.set.value.4B",
-//               FT_UINT32, BASE_HEX, NULL, 0x0, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cmd_prop_attr_set_4B_value_rsvd,
-//            { "Reserved", "nvme-rdma.cmd.prop_attr.set.value.rsvd",
-//               FT_UINT32, BASE_HEX, NULL, 0x0, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cmd_prop_attr_set_8B_value,
-//            { "Value", "nvme-rdma.cmd.prop_attr.set.value.8B",
-//               FT_UINT64, BASE_HEX, NULL, 0x0, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cmd_prop_attr_set_rsvd3,
-//            { "Reserved", "nvme-rdma.cmd.prop_attr.set.rsvd3",
-//               FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
-//        },
+        },
+        { &hf_nvme_fabrics_cmd_prop_attr_set_4B_value,
+            { "Value", "nvme-tcp.cmd.prop_attr.set.value.4B",
+               FT_UINT32, BASE_HEX, NULL, 0x0, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cmd_prop_attr_set_4B_value_rsvd,
+            { "Reserved", "nvme-tcp.cmd.prop_attr.set.value.rsvd",
+               FT_UINT32, BASE_HEX, NULL, 0x0, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cmd_prop_attr_set_8B_value,
+            { "Value", "nvme-tcp.cmd.prop_attr.set.value.8B",
+               FT_UINT64, BASE_HEX, NULL, 0x0, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cmd_prop_attr_set_rsvd3,
+            { "Reserved", "nvme-tcp.cmd.prop_attr.set.rsvd3",
+               FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+        },
 //        { &hf_nvme_rdma_cmd_generic_rsvd1,
 //            { "Reserved", "nvme-rdma.cmd.generic.rsvd1",
 //               FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
