@@ -1469,17 +1469,12 @@ dissect_nvme_tcp_command(tvbuff_t *tvb, packet_info *pinfo, int offset,
 		}
 	} else {
 		tvbuff_t *nvme_tvbuff;
-//		proto_item      *ti;
-//		proto_tree      *nvme_tree;
 		cmd_ctx->n_cmd_ctx.fabric = FALSE;
-		/* nvme command is incaplused after tcp header */
-//		ti = proto_tree_add_item(tree, proto_nvme_tcp, tvb, 8, -1, ENC_NA);
-//		nvme_tree = proto_item_add_subtree(ti, ett_nvme);
-
-		nvme_tvbuff = tvb_new_subset_remaining(tvb, 8);
+		/* get incapsuled nvme command */
+		nvme_tvbuff = tvb_new_subset_remaining(tvb, NVME_TCP_HEADER_SIZE);
 		dissect_nvme_cmd(nvme_tvbuff, pinfo, tree, &queue->n_q_ctx,
 		                   &cmd_ctx->n_cmd_ctx);
-		// FIXME: add disection of nvme command notfabrics
+		// FIXME: Interesting what to do here ??? should i parse data or somethinh ??
 	}
 
 	// NVME COMMAND IS 64 ...
