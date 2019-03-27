@@ -1401,7 +1401,6 @@ dissect_nvme_fabric_cmd(tvbuff_t *nvme_tvb, proto_tree *nvme_tree,
     case nvme_fabrics_type_property_set:
         dissect_nvme_fabric_prop_set_cmd(cmd_tree, nvme_tvb, offset);
         break;
-//    case NVME_FCTYPE_AUTH_RECV:
     default:
         dissect_nvme_fabric_generic_cmd(cmd_tree, nvme_tvb, offset);
         break;
