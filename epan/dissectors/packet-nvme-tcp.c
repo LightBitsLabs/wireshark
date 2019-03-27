@@ -85,6 +85,7 @@ static dissector_handle_t nvmet_tcp_handle;
 //#define SID_ULP_TCP ((SID_ULP << 3 * 8) | (SID_PROTO_TCP << 2 * 8))
 //
 #define NVME_FABRICS_TCP "NVMe Fabrics TCP"
+#define NVME_TCP_HEADER_SIZE 8
 //
 //#define NVME_FABRIC_CMD_SIZE NVME_CMD_SIZE
 //#define NVME_FABRIC_CQE_SIZE NVME_CQE_SIZE
@@ -129,10 +130,34 @@ static const value_string nvme_tcp_pdu_type_vals[] = {
   { 0, NULL }
 };
 
+enum nvmf_capsule_command {
+	nvme_fabrics_type_property_set	= 0x00,
+	nvme_fabrics_type_connect	= 0x01,
+	nvme_fabrics_type_property_get	= 0x04,
+};
+
+static const value_string nvme_fabrics_cmd_type_vals[] = {
+	{ nvme_fabrics_type_connect,       "Connect"},
+	{ nvme_fabrics_type_property_get,  "Property Get"},
+	{ nvme_fabrics_type_property_set,  "Property Set"},
+	{ 0, NULL}
+};
+
+
+
 enum nvme_tcp_digest_option {
 	NVME_TCP_HDR_DIGEST_ENABLE	= (1 << 0),
 	NVME_TCP_DATA_DIGEST_ENABLE	= (1 << 1),
 };
+
+/*
+ * Fabrics subcommands.
+ */
+enum nvmf_fabrics_opcode {
+	nvme_fabrics_command		= 0x7f,
+};
+
+#define NVME_FABRIC_CMD_SIZE NVME_CMD_SIZE
 
 
 //
@@ -166,6 +191,13 @@ struct nvme_tcp_q_ctx {
     struct nvme_q_ctx n_q_ctx;
 };
 
+
+struct nvme_tcp_cmd_ctx {
+    struct nvme_cmd_ctx n_cmd_ctx;
+    guint8 fctype;    /* fabric cmd type */
+};
+
+
 static int hf_nvme_tcp_type = -1;
 static int hf_nvme_tcp_flags = -1;
 static int hf_nvme_tcp_hlen = -1;
@@ -185,6 +217,109 @@ static int hf_nvme_tcp_icresp_pfv = -1;
 static int hf_nvme_tcp_icresp_cpda = -1;
 static int hf_nvme_tcp_icresp_digest = -1;
 static int hf_nvme_tcp_icresp_maxdata = -1;
+
+
+/* NVMe fabrics command */
+static int hf_nvme_fabrics_cmd = -1;
+static int hf_nvme_fabrics_cmd_opc = -1;
+static int hf_nvme_fabrics_cmd_rsvd1 = -1;
+static int hf_nvme_fabrics_cmd_cid = -1;
+static int  hf_nvme_fabrics_cmd_fctype = -1;
+static int hf_nvme_fabrics_cmd_generic_rsvd1 = -1;
+static int hf_nvme_fabrics_cmd_generic_field = -1;
+
+/* NVMe fabrics connect command  */
+static int hf_nvme_fabrics_cmd_connect_rsvd2 = -1;
+static int hf_nvme_fabrics_cmd_connect_sgl1 = -1;
+static int hf_nvme_fabrics_cmd_connect_recfmt = -1;
+static int hf_nvme_fabrics_cmd_connect_qid = -1;
+static int hf_nvme_fabrics_cmd_connect_sqsize = -1;
+static int hf_nvme_fabrics_cmd_connect_cattr = -1;
+static int hf_nvme_fabrics_cmd_connect_rsvd3 = -1;
+static int hf_nvme_fabrics_cmd_connect_kato = -1;
+static int hf_nvme_fabrics_cmd_connect_rsvd4 = -1;
+
+/* NVMe fabrics data */
+static int hf_nvme_fabrics_from_host_unknown_data = -1;
+
+/* NVMe fabrics connect command data*/
+static int hf_nvme_fabrics_cmd_data = -1;
+static int hf_nvme_fabrics_cmd_connect_data_hostid = -1;
+static int hf_nvme_fabrics_cmd_connect_data_cntlid = -1;
+static int hf_nvme_fabrics_cmd_connect_data_rsvd4 = -1;
+static int hf_nvme_fabrics_cmd_connect_data_subnqn = -1;
+static int hf_nvme_fabrics_cmd_connect_data_hostnqn = -1;
+static int hf_nvme_fabrics_cmd_connect_data_rsvd5 = -1;
+
+
+
+
+//static int hf_nvme_fabrics_cmd_connect_rsvd1 = -1;
+//static int hf_nvme_fabrics_cmd_connect_rsvd1 = -1;
+
+
+    //dissect_nvme_cmd_sgl(cmd_tvb, cmd_tree, hf_nvme_rdma_cmd_connect_sgl1, NULL);
+    /*proto_tree_add_item(cmd_tree, hf_nvme_rdma_cmd_connect_recfmt, cmd_tvb,
+                        40, 2, ENC_LITTLE_ENDIAN);*/
+//    proto_tree_add_item(cmd_tree, hf_nvme_rdma_cmd_connect_qid, cmd_tvb,
+//                        42, 2, ENC_LITTLE_ENDIAN);
+//    proto_tree_add_item(cmd_tree, hf_nvme_rdma_cmd_connect_sqsize, cmd_tvb,
+//                        44, 2, ENC_LITTLE_ENDIAN);
+//    proto_tree_add_item(cmd_tree, hf_nvme_rdma_cmd_connect_cattr, cmd_tvb,
+//                        46, 1, ENC_LITTLE_ENDIAN);
+//    proto_tree_add_item(cmd_tree, hf_nvme_rdma_cmd_connect_rsvd2, cmd_tvb,
+//                        47, 1, ENC_NA);
+//    proto_tree_add_item(cmd_tree, hf_nvme_rdma_cmd_connect_kato, cmd_tvb,
+//                        48, 4, ENC_LITTLE_ENDIAN);
+//    proto_tree_add_item(cmd_tree, hf_nvme_rdma_cmd_connect_rsvd3, cmd_tvb,
+//                        52, 12, ENC_NA);
+
+
+//static int hf_nvme_rdma_from_host_unknown_data = -1;
+//
+//static int hf_nvme_rdma_cmd_opc = -1;
+//static int hf_nvme_rdma_cmd_rsvd = -1;
+
+//static int hf_nvme_rdma_cmd_fctype = -1;
+//static int hf_nvme_rdma_cmd_connect_rsvd1 = -1;
+//static int hf_nvme_rdma_cmd_connect_sgl1 = -1;
+//static int hf_nvme_rdma_cmd_connect_recfmt = -1;
+//static int hf_nvme_rdma_cmd_connect_qid = -1;
+//static int hf_nvme_rdma_cmd_connect_sqsize = -1;
+//static int hf_nvme_rdma_cmd_connect_cattr = -1;
+//static int hf_nvme_rdma_cmd_connect_rsvd2 = -1;
+//static int hf_nvme_rdma_cmd_connect_kato = -1;
+//static int hf_nvme_rdma_cmd_connect_rsvd3 = -1;
+//static int hf_nvme_rdma_cmd_data = -1;
+//static int hf_nvme_rdma_cmd_connect_data_hostid = -1;
+//static int hf_nvme_rdma_cmd_connect_data_cntlid = -1;
+//static int hf_nvme_rdma_cmd_connect_data_rsvd = -1;
+//static int hf_nvme_rdma_cmd_connect_data_subnqn = -1;
+//static int hf_nvme_rdma_cmd_connect_data_hostnqn = -1;
+//static int hf_nvme_rdma_cmd_connect_data_rsvd1 = -1;
+//
+//static int hf_nvme_rdma_cmd_prop_attr_rsvd = -1;
+//static int hf_nvme_rdma_cmd_prop_attr_rsvd1 = -1;
+//static int hf_nvme_rdma_cmd_prop_attr_size = -1;
+//static int hf_nvme_rdma_cmd_prop_attr_rsvd2 = -1;
+//static int hf_nvme_rdma_cmd_prop_attr_offset = -1;
+//static int hf_nvme_rdma_cmd_prop_attr_get_rsvd3 = -1;
+//static int hf_nvme_rdma_cmd_prop_attr_set_4B_value = -1;
+//static int hf_nvme_rdma_cmd_prop_attr_set_4B_value_rsvd = -1;
+//static int hf_nvme_rdma_cmd_prop_attr_set_8B_value = -1;
+//static int hf_nvme_rdma_cmd_prop_attr_set_rsvd3 = -1;
+//
+//static int hf_nvme_rdma_cmd_generic_rsvd1 = -1;
+//static int hf_nvme_rdma_cmd_generic_field = -1;
+
+
+
+
+/* tracking Cmd and its respective CQE */
+//static int hf_nvme_rdma_cmd_pkt = -1;
+static int hf_nvme_tcp_cqe_pkt = -1;
+//static int hf_nvme_rdma_cmd_latency = -1;
+//static int hf_nvme_rdma_cmd_qid = -1;
 
 
 
@@ -286,8 +421,10 @@ static int hf_nvme_tcp_icresp_maxdata = -1;
 //static gint ett_data = -1;
 //
 static gint ett_nvme_tcp = -1;
-static gint ett_nvmet_tcp_icqreq = -1;
-static gint ett_nvmet_tcp_icqresp = -1;
+static gint ett_nvme_tcp_icqreq = -1;
+static gint ett_nvme_tcp_icqresp = -1;
+static gint ett_nvme_fabrics = -1;
+static gint ett_nvme_fabrics_data = -1;
 static range_t *gPORT_RANGE;
 //
 //static conversation_infiniband_data *get_conversion_data(conversation_t *conv)
@@ -981,7 +1118,7 @@ get_nvme_tcp_pdu_len(packet_info *pinfo __attribute__((unused)), tvbuff_t *tvb _
 //	return 8;
 }
 
-static int
+static void
 nvme_tcp_dissect_icreq(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), int offset,
 		       proto_tree *tree, struct nvme_tcp_q_ctx *queue) {
 
@@ -992,7 +1129,7 @@ nvme_tcp_dissect_icreq(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused))
 
 
 	tf = proto_tree_add_item(tree, hf_nvme_tcp_icreq, tvb, offset, -1, ENC_NA);
-	icreq_tree = proto_item_add_subtree(tf, ett_nvmet_tcp_icqreq);
+	icreq_tree = proto_item_add_subtree(tf, ett_nvme_tcp_icqreq);
 
 	//col_append_fstr(pinfo->cinfo, COL_INFO, " proto=%d", protocol) ;
 
@@ -1013,12 +1150,12 @@ nvme_tcp_dissect_icreq(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused))
 	// FIXME: should i register queue here???
 
 	/* This is a "spare" field */
-	offset += 112;
-	return offset;
+//	offset += 112;
+//	return offset;
 }
 
 
-static int
+static void
 nvme_tcp_dissect_icresp(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), int offset,
 		        proto_tree *tree, struct nvme_tcp_q_ctx *queue __attribute__((unused))) {
 
@@ -1029,7 +1166,7 @@ nvme_tcp_dissect_icresp(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)
 
 
 	tf = proto_tree_add_item(tree, hf_nvme_tcp_icresp, tvb, offset, -1, ENC_NA);
-	icresp_tree = proto_item_add_subtree(tf, ett_nvmet_tcp_icqresp);
+	icresp_tree = proto_item_add_subtree(tf, ett_nvme_tcp_icqresp);
 
 	//col_append_fstr(pinfo->cinfo, COL_INFO, " proto=%d", protocol) ;
 
@@ -1046,9 +1183,226 @@ nvme_tcp_dissect_icresp(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)
 	// FIXME: now adjust data and header digest according to response
 
 	/* This is a "spare" field */
-	offset += 112;
-	return offset;
+//	offset += 112;
+//	return offset;
 }
+
+
+static void
+dissect_nvme_fabric_connect_cmd_data(tvbuff_t *data_tvb, proto_tree *data_tree,
+                                     guint offset)
+{
+    proto_tree_add_item(data_tree, hf_nvme_fabrics_cmd_connect_data_hostid, data_tvb,
+                        offset, 16, ENC_NA);
+    proto_tree_add_item(data_tree, hf_nvme_fabrics_cmd_connect_data_cntlid, data_tvb,
+                        offset + 16, 2, ENC_LITTLE_ENDIAN);
+    proto_tree_add_item(data_tree, hf_nvme_fabrics_cmd_connect_data_rsvd4, data_tvb,
+                        offset + 18, 238, ENC_NA);
+    proto_tree_add_item(data_tree, hf_nvme_fabrics_cmd_connect_data_subnqn, data_tvb,
+                        offset + 256, 256, ENC_ASCII | ENC_NA);
+    proto_tree_add_item(data_tree, hf_nvme_fabrics_cmd_connect_data_hostnqn, data_tvb,
+                        offset + 512, 256, ENC_ASCII | ENC_NA);
+    proto_tree_add_item(data_tree, hf_nvme_fabrics_cmd_connect_data_rsvd5, data_tvb,
+                        offset + 768, 256, ENC_NA);
+}
+
+
+static void
+dissect_nvme_fabric_data(tvbuff_t *nvme_tvb, proto_tree *nvme_tree,
+			 guint32 len, guint8 fctype, int offset)
+{
+    proto_tree *data_tree;
+    proto_item *ti;
+
+    ti = proto_tree_add_item(nvme_tree, hf_nvme_fabrics_cmd_data, nvme_tvb, 0,
+                             len, ENC_NA);
+    data_tree = proto_item_add_subtree(ti, ett_nvme_fabrics_data);
+
+    switch (fctype) {
+    case nvme_fabrics_type_connect:
+        dissect_nvme_fabric_connect_cmd_data(nvme_tvb, data_tree, offset);
+        break;
+    default:
+        proto_tree_add_item(data_tree, hf_nvme_fabrics_from_host_unknown_data,
+                            nvme_tvb, 0, len, ENC_NA);
+        break;
+    }
+
+//	static int hf_nvme_fabrics_cmd_data = -1;
+//	static int hf_nvme_fabrics_cmd_connect_data_hostid = -1;
+//	static int hf_nvme_fabrics_cmd_connect_data_cntlid = -1;
+//	static int hf_nvme_fabrics_cmd_connect_data_rsvd4 = -1;
+//	static int hf_nvme_fabrics_cmd_connect_data_subnqn = -1;
+//	static int hf_nvme_fabrics_cmd_connect_data_hostnqn = -1;
+//	static int hf_nvme_fabrics_cmd_connect_data_rsvd5 = -1;
+}
+
+
+static void dissect_nvme_fabric_generic_cmd(proto_tree *cmd_tree, tvbuff_t *cmd_tvb, int offset)
+{
+    proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_generic_rsvd1, cmd_tvb,
+                        offset + 5, 35, ENC_NA);
+    proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_generic_field, cmd_tvb,
+                        offset + 40, 24, ENC_NA);
+}
+
+static void dissect_nvme_fabric_connect_cmd(proto_tree *cmd_tree, tvbuff_t *cmd_tvb, int offset)
+{
+    proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_connect_rsvd2, cmd_tvb,
+	    	        offset + 5, 19, ENC_NA);
+    dissect_nvme_cmd_sgl(cmd_tvb, cmd_tree, hf_nvme_fabrics_cmd_connect_sgl1, NULL);
+    proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_connect_recfmt, cmd_tvb,
+		    	offset + 40, 2, ENC_LITTLE_ENDIAN);
+    proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_connect_qid, cmd_tvb,
+		    	offset + 42, 2, ENC_LITTLE_ENDIAN);
+    proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_connect_sqsize, cmd_tvb,
+		    	offset + 44, 2, ENC_LITTLE_ENDIAN);
+    proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_connect_cattr, cmd_tvb,
+		    	offset + 46, 1, ENC_LITTLE_ENDIAN);
+    proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_connect_rsvd3, cmd_tvb,
+		    	offset + 47, 1, ENC_NA);
+    proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_connect_kato, cmd_tvb,
+		    	offset + 48, 4, ENC_LITTLE_ENDIAN);
+    proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_connect_rsvd4, cmd_tvb,
+		    	offset + 52, 12, ENC_NA);
+}
+
+
+static void
+dissect_nvme_fabric_cmd(tvbuff_t *nvme_tvb, proto_tree *nvme_tree,
+                        struct nvme_tcp_cmd_ctx *cmd_ctx, int offset)
+{
+    proto_tree *cmd_tree;
+    proto_item *ti, *opc_item;/*, *fctype_item;*/
+    //*opc_item,;
+    guint8 fctype;
+//
+    fctype = tvb_get_guint8(nvme_tvb, offset + 4);
+    cmd_ctx->fctype = fctype;
+
+    ti = proto_tree_add_item(nvme_tree, hf_nvme_fabrics_cmd, nvme_tvb, 0,
+                             NVME_FABRIC_CMD_SIZE, ENC_NA);
+    cmd_tree = proto_item_add_subtree(ti, ett_nvme_fabrics);
+
+    opc_item = proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_opc, nvme_tvb,
+                                   offset, 1, ENC_NA);
+    proto_item_append_text(opc_item, "%s", " Fabric Cmd");
+
+    nvme_publish_cmd_to_cqe_link(cmd_tree, nvme_tvb, hf_nvme_tcp_cqe_pkt,
+                                 &cmd_ctx->n_cmd_ctx);
+
+    proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_rsvd1, nvme_tvb,
+                        offset + 1, 1, ENC_NA);
+
+    proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_cid, nvme_tvb,
+		    	offset + 2, 2, ENC_LITTLE_ENDIAN);
+
+    // FIXME what about unknown type??
+    /*fctype_item = */proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_fctype,
+                                      nvme_tvb,
+                                      offset + 4, 1, ENC_LITTLE_ENDIAN);
+
+//    proto_item_append_text(fctype_item, " %s",
+//                           val_to_str(fctype, fctype_tbl, "Unknown FcType"));
+//
+    switch(fctype) {
+    case nvme_fabrics_type_connect:
+        dissect_nvme_fabric_connect_cmd(cmd_tree, nvme_tvb, offset);
+        break;
+//    case NVME_FCTYPE_PROP_GET:
+//        dissect_nvme_fabric_prop_get_cmd(cmd_tree, nvme_tvb);
+//        break;
+//    case NVME_FCTYPE_PROP_SET:
+//        dissect_nvme_fabric_prop_set_cmd(cmd_tree, nvme_tvb);
+//        break;
+//    case NVME_FCTYPE_AUTH_RECV:
+    default:
+        dissect_nvme_fabric_generic_cmd(cmd_tree, nvme_tvb, offset);
+        break;
+    }
+
+}
+
+
+static struct nvme_tcp_cmd_ctx*
+bind_cmd_to_qctx(packet_info *pinfo, struct nvme_q_ctx *q_ctx,
+                 guint16 cmd_id)
+{
+   struct nvme_tcp_cmd_ctx *ctx;
+
+
+   // FIXME: why in rdma they are asking if they visited the frame ??
+   ctx = wmem_new0(wmem_file_scope(), struct nvme_tcp_cmd_ctx);
+   nvme_add_cmd_to_pending_list(pinfo, q_ctx,
+                                &ctx->n_cmd_ctx, (void*)ctx, cmd_id);
+   return ctx;
+
+   //ctx = (struct nvme_rdma_cmd_ctx*)
+   //                 nvme_lookup_cmd_in_done_list(pinfo, q_ctx, cmd_id);
+
+//   if (!PINFO_FD_VISITED(pinfo)) {
+//       ctx = wmem_new0(wmem_file_scope(), struct nvme_tcp_cmd_ctx);
+//
+//       nvme_add_cmd_to_pending_list(pinfo, q_ctx,
+//                                    &ctx->n_cmd_ctx, (void*)ctx, cmd_id);
+//    } else {
+//        /* Already visited this frame */
+//        ctx = (struct nvme_rdma_cmd_ctx*)
+//                  nvme_lookup_cmd_in_done_list(pinfo, q_ctx, cmd_id);
+//        /* if we have already visited frame but haven't found completion yet,
+//         * we won't find cmd in done q, so allocate a dummy ctx for doing
+//         * rest of the processing.
+//         */
+//        if (!ctx)
+//            ctx = wmem_new0(wmem_file_scope(), struct nvme_rdma_cmd_ctx);
+//    }
+//    return ctx;
+}
+
+
+static void
+nvme_tcp_dissect_command(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), int offset,
+		        proto_tree *tree, struct nvme_tcp_q_ctx *queue __attribute__((unused)),
+			guint32         incapsuled_data_size) {
+
+	struct nvme_tcp_cmd_ctx *cmd_ctx;
+	guint16 cmd_id;
+	guint8 opcode;
+
+	opcode = tvb_get_guint8(tvb, offset);
+	cmd_id = tvb_get_guint16(tvb, offset + 2, ENC_LITTLE_ENDIAN);
+	cmd_ctx = bind_cmd_to_qctx(pinfo, &queue->n_q_ctx, cmd_id);
+
+	if (opcode == nvme_fabrics_command) {
+		cmd_ctx->n_cmd_ctx.fabric = TRUE;
+		dissect_nvme_fabric_cmd(tvb, tree, cmd_ctx, offset);
+		if (incapsuled_data_size > 0) {
+			dissect_nvme_fabric_data(tvb, tree, incapsuled_data_size, cmd_ctx->fctype, offset + NVME_FABRIC_CMD_SIZE);
+		}
+		// Now dissect data ....
+
+		//len -= NVME_FABRIC_CMD_SIZE;
+		//if (len)
+		//dissect_nvme_fabric_data(tvb, nvme_tree, len, cmd_ctx->fctype);
+	} else {
+		// FIXME: add disection of nvme command notfabrics
+	}
+
+	// NVME COMMAND IS 64 ...
+
+//	    } else {
+//	        cmd_ctx->n_cmd_ctx.fabric = FALSE;
+//	        dissect_nvme_cmd(nvme_tvb, pinfo, root_tree, &q_ctx->n_q_ctx,
+//	                         &cmd_ctx->n_cmd_ctx);
+//	        if (cmd_ctx->n_cmd_ctx.remote_key) {
+//	            nvme_add_data_request(pinfo, &q_ctx->n_q_ctx,
+//	                                  &cmd_ctx->n_cmd_ctx, (void*)cmd_ctx);
+//	        }
+	//}
+
+}
+
+
 
 
 static int
@@ -1057,10 +1411,14 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), 
 	struct nvme_tcp_q_ctx *q_ctx;
 	proto_item      *ti;
 	int             offset = 0;
+	int 		nvme_tcp_pdu_offset;
 	proto_tree      *nvme_tree;
 	guint           packet_type;
 	//guint           pdo;
-	//guint32         payload_data_len;
+	guint32         hlen;
+	guint32         plen;
+	guint32         incapsuled_data_size;
+
 
 	conversation = find_or_create_conversation(pinfo);
 	q_ctx = (struct nvme_tcp_q_ctx *)conversation_get_proto_data(conversation, proto_nvme_tcp);
@@ -1086,16 +1444,12 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), 
 
 	packet_type = tvb_get_guint8(tvb, offset);
 	proto_tree_add_item(nvme_tree, hf_nvme_tcp_type, tvb, offset, 1, ENC_NA);
-	offset+=1;
-	proto_tree_add_item(nvme_tree, hf_nvme_tcp_flags, tvb, offset, 1, ENC_NA);
-	offset+=1;
-	proto_tree_add_item(nvme_tree, hf_nvme_tcp_hlen, tvb, offset, 1, ENC_NA);
-	offset+=1;
-	//pdo = tvb_get_guint8(tvb, offset);
-	proto_tree_add_item(nvme_tree, hf_nvme_tcp_pdo, tvb, offset, 1, ENC_NA);
-	offset+=1;
-	proto_tree_add_item(nvme_tree, hf_nvme_tcp_plen, tvb, offset, 4, ENC_LITTLE_ENDIAN);
-	offset+=4;
+	proto_tree_add_item(nvme_tree, hf_nvme_tcp_flags, tvb, offset + 1, 1, ENC_NA);
+	hlen = tvb_get_letohs(tvb, offset + 2);
+	proto_tree_add_item(nvme_tree, hf_nvme_tcp_hlen, tvb, offset + 2, 1, ENC_NA);
+	proto_tree_add_item(nvme_tree, hf_nvme_tcp_pdo, tvb, offset + 3, 1, ENC_NA);
+	plen = tvb_get_letohl(tvb, offset + 4);
+	proto_tree_add_item(nvme_tree, hf_nvme_tcp_plen, tvb, offset + 4, 4, ENC_LITTLE_ENDIAN);
 	col_set_str(pinfo->cinfo, COL_PROTOCOL, NVME_FABRICS_TCP);
 
 	//
@@ -1103,21 +1457,33 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), 
 
 	//nvme_publish_qid(nvme_tree, hf_nvme_rdma_cmd_qid, q_ctx->n_q_ctx.qid);
 	/* When we get here offset points directly after tcp header */
+	nvme_tcp_pdu_offset = offset + NVME_TCP_HEADER_SIZE;
+
+	/* This is the total length of the payload minus nvme header size
+	 * Needed to */
+	incapsuled_data_size = plen - hlen;
+	printf("Plen %u hlen %u capsule len %u \n", plen, hlen, incapsuled_data_size);
 
 	switch (packet_type) {
 	case nvme_tcp_icreq:
 		col_set_str(pinfo->cinfo, COL_INFO, "Connect Request");
-		offset = nvme_tcp_dissect_icreq(tvb, pinfo, offset, nvme_tree, q_ctx);
+		nvme_tcp_dissect_icreq(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tree, q_ctx);
 		break;
 	case nvme_tcp_icresp:
 		col_set_str(pinfo->cinfo, COL_INFO, "Connect Response");
-		offset = nvme_tcp_dissect_icresp(tvb, pinfo, offset, nvme_tree, q_ctx);
+		nvme_tcp_dissect_icresp(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tree, q_ctx);
+		break;
+	case nvme_tcp_cmd:
+		//col_set_str(pinfo->cinfo, COL_INFO, "");
+		nvme_tcp_dissect_command(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tree, q_ctx, incapsuled_data_size);
 		break;
 	default:
 		printf("Error in parsing...\n");
 		// FIXME: add here error info
 
 	}
+
+	offset += plen;
 
 	//osset +=
 
@@ -1132,7 +1498,7 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), 
 }
 
 
-#define NVME_TCP_HEADER_SIZE 8
+
 static int
 dissect_nvme_tcp(tvbuff_t *tvb __attribute__((unused)), packet_info *pinfo __attribute__((unused)), proto_tree *tree __attribute__((unused)), void *data __attribute__((unused)))
 {
@@ -1251,6 +1617,151 @@ proto_register_nvme_tcp(void)
 			{ "Maximum data capsules per r2t supported", "nvme-tcp.icresp.maxdata",
 			FT_UINT8, BASE_DEC, NULL,  0x0,
 				NULL, HFILL }},
+
+	    /* NVMe fabrics command */
+	   { &hf_nvme_fabrics_cmd,
+	    { "Cmd", "nvme-tcp.cmd",
+	       FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	   },
+
+	   { &hf_nvme_fabrics_cmd_opc,
+	       { "Opcode", "nvme-tcp.cmd.opc",
+		  FT_UINT8, BASE_HEX, NULL, 0x0, NULL, HFILL}
+	   },
+
+	   { &hf_nvme_tcp_cqe_pkt,
+	       { "Fabric Cqe in", "nvme-tcp.cqe_pkt",
+		 FT_FRAMENUM, BASE_NONE, NULL, 0,
+		 "The Cqe for this transaction is in this frame", HFILL }
+	   },
+	   { &hf_nvme_fabrics_cmd_rsvd1,
+	       { "Reserved", "nvme-tcp.cmd.rsvd",
+		  FT_UINT8, BASE_HEX, NULL, 0x0, NULL, HFILL}
+	   },
+
+	   { &hf_nvme_fabrics_cmd_cid,
+	               { "Command ID", "nvme-tcp.cmd.cid",
+	                  FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
+	   },
+
+	   { &hf_nvme_fabrics_cmd_fctype,
+	      { "Fabric Cmd Type", "nvme-tcp.cmd.fctype",
+		 FT_UINT8, BASE_HEX, VALS (nvme_fabrics_cmd_type_vals) , 0x0, NULL, HFILL}
+	  },
+
+	  { &hf_nvme_fabrics_cmd_generic_rsvd1,
+	              { "Reserved", "nvme-rdma.cmd.generic.rsvd1",
+	                 FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	  },
+	  { &hf_nvme_fabrics_cmd_generic_field,
+	      { "Fabric Cmd specific field", "nvme-rdma.cmd.generic.field",
+		 FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	  },
+
+	  /* NVMe connect command fields */
+	  { &hf_nvme_fabrics_cmd_connect_rsvd2,
+	      { "Reserved", "nvme-tcp.cmd.connect.rsvd1",
+		 FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	  },
+	  { &hf_nvme_fabrics_cmd_connect_sgl1,
+	      { "SGL1", "nvme-tcp.cmd.connect.sgl1",
+		 FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	  },
+	  { &hf_nvme_fabrics_cmd_connect_recfmt,
+	      { "Record Format", "nvme-tcp.cmd.connect.recfmt",
+		 FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
+	  },
+	  { &hf_nvme_fabrics_cmd_connect_qid,
+	      { "Queue ID", "nvme-tcp.cmd.connect.qid",
+		 FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
+	  },
+	  { &hf_nvme_fabrics_cmd_connect_sqsize,
+	      { "SQ Size", "nvme-tcp.cmd.connect.sqsize",
+		 FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
+	  },
+	  { &hf_nvme_fabrics_cmd_connect_cattr,
+	      { "Connect Attributes", "nvme-tcp.cmd.connect.cattr",
+		 FT_UINT8, BASE_HEX, NULL, 0x0, NULL, HFILL}
+	  },
+	  { &hf_nvme_fabrics_cmd_connect_rsvd3,
+	      { "Reserved", "nvme-tcp.cmd.connect.rsvd2",
+		 FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	  },
+	  { &hf_nvme_fabrics_cmd_connect_kato,
+	      { "Keep Alive Timeout", "nvme-tcp.cmd.connect.kato",
+		 FT_UINT32, BASE_DEC|BASE_UNIT_STRING, &units_milliseconds, 0x0, NULL, HFILL}
+	  },
+	  { &hf_nvme_fabrics_cmd_connect_rsvd4,
+	      { "Reserved", "nvme-tcp.cmd.connect.rsvd4",
+		 FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	  },
+
+	  /* NVMe connect command data */
+	  { &hf_nvme_fabrics_cmd_data,
+	      { "Data", "nvme-tcp.cmd.data",
+		 FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	  },
+	  { &hf_nvme_fabrics_cmd_connect_data_hostid,
+	      { "Host Identifier", "nvme-tcp.cmd.connect.data.hostid",
+		 FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	  },
+	  { &hf_nvme_fabrics_cmd_connect_data_cntlid,
+	      { "Controller ID", "nvme-tcp.cmd.connect.data.cntrlid",
+		 FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
+	  },
+	  { &hf_nvme_fabrics_cmd_connect_data_rsvd4,
+	      { "Reserved", "nvme-tcpcmd.connect.data.rsvd4",
+		 FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	  },
+	  { &hf_nvme_fabrics_cmd_connect_data_subnqn,
+	      { "Subsystem NQN", "nvme-tcp.cmd.connect.data.subnqn",
+		 FT_STRING, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	  },
+	  { &hf_nvme_fabrics_cmd_connect_data_hostnqn,
+	      { "Host NQN", "nvme-tcp.cmd.connect.data.hostnqn",
+		 FT_STRING, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	  },
+	  { &hf_nvme_fabrics_cmd_connect_data_rsvd5,
+	      { "Reserved", "nvme-tcp.cmd.connect.data.rsvd5",
+		 FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	  },
+	  { &hf_nvme_fabrics_from_host_unknown_data,
+	      { "Dissection unsupported", "nvme-rdma.unknown_data",
+		 FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	  },
+
+
+
+
+//	  static int hf_nvme_fabrics_cmd_data = -1;
+//	  static int hf_nvme_fabrics_cmd_connect_data_hostid = -1;
+//	  static int hf_nvme_fabrics_cmd_connect_data_cntlid = -1;
+//	  static int hf_nvme_fabrics_cmd_connect_data_rsvd = -1;
+//	  static int hf_nvme_fabrics_cmd_connect_data_subnqn = -1;
+//	  static int hf_nvme_fabrics_cmd_connect_data_hostnqn = -1;
+//	  static int hf_nvme_fabrics_cmd_connect_data_rsvd1 = -1;
+
+
+
+/*
+
+
+	  static int hf_nvme_fabrics_cmd_connect_rsvd1 = -1;
+	  static int hf_nvme_fabrics_cmd_connect_sgl1 = -1;
+	  static int hf_nvme_fabrics_cmd_connect_recfmt = -1;
+	  static int hf_nvme_fabrics_cmd_connect_qid = -1;
+	  static int hf_nvme_fabrics_cmd_connect_sqsize = -1;
+	  static int hf_nvme_fabrics_cmd_connect_cattr = -1;
+	  static int hf_nvme_fabrics_cmd_connect_rsvd2 = -1;
+	  static int hf_nvme_fabrics_cmd_connect_kato = -1;
+	  static int hf_nvme_fabrics_cmd_connect_rsvd3 = -1;
+	  static int hf_nvme_fabrics_cmd_connect_rsvd4 = -1;
+	  */
+
+
+
+
+
 
      };
 
@@ -1509,8 +2020,10 @@ proto_register_nvme_tcp(void)
 //    };
     static gint *ett[] = {
         &ett_nvme_tcp,
-	&ett_nvmet_tcp_icqreq,
-	&ett_nvmet_tcp_icqresp
+	&ett_nvme_tcp_icqreq,
+	&ett_nvme_tcp_icqresp,
+	&ett_nvme_fabrics,
+	&ett_nvme_fabrics_data
     };
 //
      proto_nvme_tcp = proto_register_protocol("NVM Express Fabrics TCP",
