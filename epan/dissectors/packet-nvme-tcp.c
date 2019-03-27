@@ -534,6 +534,11 @@ dissect_nvme_tcp_command(tvbuff_t *tvb,
     cmd_id = tvb_get_guint16(tvb, offset + 2, ENC_LITTLE_ENDIAN);
     cmd_ctx = bind_cmd_to_qctx(pinfo, &queue->n_q_ctx, cmd_id);
 
+    /* if record did not contain connect command we wont know qid,
+     * so lets guess if this is an admin queue */
+    if ((queue->n_q_ctx.qid == G_MAXUINT16) && !nvme_is_io_queue_opcode(opcode))
+        queue->n_q_ctx.qid = 0;
+
     if (opcode == nvme_fabrics_command) {
         guint8 fctype;
 
