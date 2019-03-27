@@ -143,6 +143,29 @@ static const value_string nvme_fabrics_cmd_type_vals[] = {
 	{ 0, NULL}
 };
 
+static const value_string attr_size_tbl[] = {
+    { 0,       "4 bytes"},
+    { 1,       "8 bytes"},
+    { 0, NULL}
+};
+
+static const value_string prop_offset_tbl[] = {
+    { 0x0,      "Controller Capabilities"},
+    { 0x8,      "Version"},
+    { 0xc,      "Reserved"},
+    { 0x10,     "Reserved"},
+    { 0x14,     "Controller Configuration"},
+    { 0x18,     "Reserved"},
+    { 0x1c,     "Controller Status"},
+    { 0x20,     "NVM Subsystem Reset"},
+    { 0x24,     "Reserved"},
+    { 0x28,     "Reserved"},
+    { 0x30,     "Reserved"},
+    { 0x38,     "Reserved"},
+    { 0x3c,     "Reserved"},
+    { 0x40,     "Reserved"},
+    { 0, NULL}
+};
 
 
 enum nvme_tcp_digest_option {
@@ -299,11 +322,14 @@ static int hf_nvme_fabrics_cmd_connect_data_rsvd5 = -1;
 //static int hf_nvme_rdma_cmd_connect_data_rsvd1 = -1;
 //
 //static int hf_nvme_rdma_cmd_prop_attr_rsvd = -1;
-//static int hf_nvme_rdma_cmd_prop_attr_rsvd1 = -1;
-//static int hf_nvme_rdma_cmd_prop_attr_size = -1;
-//static int hf_nvme_rdma_cmd_prop_attr_rsvd2 = -1;
-//static int hf_nvme_rdma_cmd_prop_attr_offset = -1;
-//static int hf_nvme_rdma_cmd_prop_attr_get_rsvd3 = -1;
+static int hf_nvme_fabrics_cmd_prop_attr_rsvd1 = -1;
+static int hf_nvme_fabrics_cmd_prop_attr_size = -1;
+static int hf_nvme_fabrics_cmd_prop_attr_rsvd2 = -1;
+static int hf_nvme_fabrics_cmd_prop_attr_offset = -1;
+static int hf_nvme_fabrics_cmd_prop_attr_rsvd3 = -1;
+static int hf_nvme_fabrics_cmd_prop_attr_get_rsvd4 = -1;
+
+
 //static int hf_nvme_rdma_cmd_prop_attr_set_4B_value = -1;
 //static int hf_nvme_rdma_cmd_prop_attr_set_4B_value_rsvd = -1;
 //static int hf_nvme_rdma_cmd_prop_attr_set_8B_value = -1;
@@ -1268,6 +1294,40 @@ static void dissect_nvme_fabric_connect_cmd(proto_tree *cmd_tree, tvbuff_t *cmd_
 }
 
 
+static guint8 dissect_nvme_fabric_prop_cmd_common(proto_tree *cmd_tree, tvbuff_t *cmd_tvb, int offset)
+{
+    proto_item *attr_item, *offset_item;
+    guint32 offset_in_string;
+    guint8 attr;
+
+    proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_prop_attr_rsvd1, cmd_tvb,
+                        offset + 5, 35, ENC_NA);
+    proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_prop_attr_rsvd2, cmd_tvb,
+		    	offset + 40, 1, ENC_LITTLE_ENDIAN);
+    attr_item = proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_prop_attr_size, cmd_tvb,
+                                    offset + 40, 1, ENC_LITTLE_ENDIAN);
+    attr = tvb_get_guint8(cmd_tvb, offset + 40) & 0x7;
+    proto_item_append_text(attr_item, " %s",
+                           val_to_str(attr, attr_size_tbl, "Reserved"));
+
+    proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_prop_attr_rsvd3, cmd_tvb,
+                        offset + 41, 3, ENC_NA);
+
+    offset_item = proto_tree_add_item_ret_uint(cmd_tree, hf_nvme_fabrics_cmd_prop_attr_offset,
+                                      cmd_tvb, offset + 44, 4, ENC_LITTLE_ENDIAN, &offset_in_string);
+    proto_item_append_text(offset_item, " %s",
+                           val_to_str(offset_in_string, prop_offset_tbl, "Unknown Property"));
+    return attr;
+}
+
+static void dissect_nvme_fabric_prop_get_cmd(proto_tree *cmd_tree, tvbuff_t *cmd_tvb, int offset)
+{
+    dissect_nvme_fabric_prop_cmd_common(cmd_tree, cmd_tvb, offset);
+    proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_prop_attr_get_rsvd4, cmd_tvb,
+                        offset + 48, 16, ENC_NA);
+}
+
+
 static void
 dissect_nvme_fabric_cmd(tvbuff_t *nvme_tvb, proto_tree *nvme_tree,
                         struct nvme_tcp_cmd_ctx *cmd_ctx, int offset)
@@ -1309,9 +1369,9 @@ dissect_nvme_fabric_cmd(tvbuff_t *nvme_tvb, proto_tree *nvme_tree,
     case nvme_fabrics_type_connect:
         dissect_nvme_fabric_connect_cmd(cmd_tree, nvme_tvb, offset);
         break;
-//    case NVME_FCTYPE_PROP_GET:
-//        dissect_nvme_fabric_prop_get_cmd(cmd_tree, nvme_tvb);
-//        break;
+    case nvme_fabrics_type_property_get:
+        dissect_nvme_fabric_prop_get_cmd(cmd_tree, nvme_tvb, offset);
+        break;
 //    case NVME_FCTYPE_PROP_SET:
 //        dissect_nvme_fabric_prop_set_cmd(cmd_tree, nvme_tvb);
 //        break;
@@ -1763,7 +1823,7 @@ proto_register_nvme_tcp(void)
 
 
 
-     };
+
 
 //    static hf_register_info hf[] = {
 //        /* IB RDMA CM fields */
@@ -1900,30 +1960,30 @@ proto_register_nvme_tcp(void)
 //            { "Reserved", "nvme-rdma.cmd.connect.data.rsvd1",
 //               FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
 //        },
-//        { &hf_nvme_rdma_cmd_prop_attr_rsvd,
-//            { "Reserved", "nvme-rdma.cmd.prop_attr.rsvd",
-//               FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cmd_prop_attr_rsvd1,
-//            { "Reserved", "nvme-rdma.cmd.prop_attr.rsvd1",
-//               FT_UINT8, BASE_HEX, NULL, 0xf8, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cmd_prop_attr_size,
-//            { "Property Size", "nvme-rdma.cmd.prop_attr.size",
-//               FT_UINT8, BASE_HEX, NULL, 0x7, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cmd_prop_attr_rsvd2,
-//            { "Reserved", "nvme-rdma.cmd.prop_attr.rsvd2",
-//               FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cmd_prop_attr_offset,
-//            { "Offset", "nvme-rdma.cmd.prop_attr.offset",
-//               FT_UINT32, BASE_HEX, NULL, 0x0, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cmd_prop_attr_get_rsvd3,
-//            { "Reserved", "nvme-rdma.cmd.prop_attr.get.rsvd3",
-//               FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
-//        },
+        { &hf_nvme_fabrics_cmd_prop_attr_rsvd1,
+            { "Reserved", "nvme-rdma.cmd.prop_attr.rsvd1",
+               FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cmd_prop_attr_rsvd2,
+            { "Reserved", "nvme-rdma.cmd.prop_attr.rsvd2",
+               FT_UINT8, BASE_HEX, NULL, 0xf8, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cmd_prop_attr_size,
+            { "Property Size", "nvme-rdma.cmd.prop_attr.size",
+               FT_UINT8, BASE_HEX, NULL, 0x7, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cmd_prop_attr_rsvd3,
+            { "Reserved", "nvme-rdma.cmd.prop_attr.rsvd3",
+               FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cmd_prop_attr_offset,
+            { "Offset", "nvme-rdma.cmd.prop_attr.offset",
+               FT_UINT32, BASE_HEX, NULL, 0x0, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cmd_prop_attr_get_rsvd4,
+            { "Reserved", "nvme-tcp.cmd.prop_attr.get.rsvd4",
+               FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+        }
 //        { &hf_nvme_rdma_cmd_prop_attr_set_4B_value,
 //            { "Value", "nvme-rdma.cmd.prop_attr.set.value.4B",
 //               FT_UINT32, BASE_HEX, NULL, 0x0, NULL, HFILL}
@@ -2017,7 +2077,7 @@ proto_register_nvme_tcp(void)
 //              FT_UINT16, BASE_HEX, NULL, 0x0,
 //              "Qid on which command is issued", HFILL }
 //        },
-//    };
+    };
     static gint *ett[] = {
         &ett_nvme_tcp,
 	&ett_nvme_tcp_icqreq,
