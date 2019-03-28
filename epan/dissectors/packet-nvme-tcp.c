@@ -84,7 +84,7 @@ static dissector_handle_t nvmet_tcp_handle;
 //#define SID_MASK (SID_ULP_MASK | SID_PROTO_MASK)
 //#define SID_ULP_TCP ((SID_ULP << 3 * 8) | (SID_PROTO_TCP << 2 * 8))
 //
-#define NVME_FABRICS_TCP "NVMe Fabrics TCP"
+#define NVME_FABRICS_TCP "NVMe/TCP"
 #define NVME_TCP_HEADER_SIZE 8
 #define NVME_TCP_DATA_PDU_SIZE 24
 //
@@ -1431,11 +1431,24 @@ bind_cmd_to_qctx(packet_info *pinfo, struct nvme_q_ctx *q_ctx,
 {
    struct nvme_tcp_cmd_ctx *ctx;
 
+   /* wireshark will dissect same packet multiple times
+    * when display is refreshed*/
+   if (!PINFO_FD_VISITED(pinfo)) {
+	   ctx = wmem_new0(wmem_file_scope(), struct nvme_tcp_cmd_ctx);
+	   nvme_add_cmd_to_pending_list(pinfo, q_ctx,
+	                                   &ctx->n_cmd_ctx, (void*)ctx, cmd_id);
+   } else {
+	   /* Already visited this frame */
+	   ctx = (struct nvme_tcp_cmd_ctx*)
+		     nvme_lookup_cmd_in_done_list(pinfo, q_ctx, cmd_id);
+	   /* if we have already visited frame but haven't found completion yet,
+	    * we won't find cmd in done q, so allocate a dummy ctx for doing
+	    * rest of the processing.
+	    */
+	   if (!ctx)
+	       ctx = wmem_new0(wmem_file_scope(), struct nvme_tcp_cmd_ctx);
+   }
 
-   // FIXME: why in rdma they are asking if they visited the frame ??
-   ctx = wmem_new0(wmem_file_scope(), struct nvme_tcp_cmd_ctx);
-   nvme_add_cmd_to_pending_list(pinfo, q_ctx,
-                                &ctx->n_cmd_ctx, (void*)ctx, cmd_id);
    return ctx;
 
    //ctx = (struct nvme_rdma_cmd_ctx*)
@@ -1475,8 +1488,13 @@ dissect_nvme_tcp_command(tvbuff_t *tvb, packet_info *pinfo, int offset,
 	cmd_ctx = bind_cmd_to_qctx(pinfo, &queue->n_q_ctx, cmd_id);
 
 	if (opcode == nvme_fabrics_command) {
+		guint8 fctype;
+
 		cmd_ctx->n_cmd_ctx.fabric = TRUE;
+		fctype = tvb_get_guint8(tvb, offset + 4);
 		dissect_nvme_fabric_cmd(tvb, tree, queue, cmd_ctx, offset);
+		col_add_fstr(pinfo->cinfo, COL_INFO, "NVMe Fabrics: %s",
+				val_to_str(fctype, nvme_fabrics_cmd_type_vals, "Unknown FcType"));
 		if (incapsuled_data_size > 0) {
 			dissect_nvme_fabric_data(tvb, tree, incapsuled_data_size, cmd_ctx->fctype, offset + NVME_FABRIC_CMD_SIZE);
 		}
@@ -1728,11 +1746,11 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), 
 
 	switch (packet_type) {
 	case nvme_tcp_icreq:
-		col_set_str(pinfo->cinfo, COL_INFO, "Connect Request");
+		col_set_str(pinfo->cinfo, COL_INFO,  "Initialize Connection Request");
 		nvme_tcp_dissect_icreq(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree, q_ctx);
 		break;
 	case nvme_tcp_icresp:
-		col_set_str(pinfo->cinfo, COL_INFO, "Connect Response");
+		col_set_str(pinfo->cinfo, COL_INFO, "Initialize Connection Response");
 		nvme_tcp_dissect_icresp(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree, q_ctx);
 		break;
 	case nvme_tcp_cmd:
@@ -1837,7 +1855,7 @@ proto_register_nvme_tcp(void)
 			NULL, HFILL }},
 
 	     { &hf_nvme_tcp_icreq,
-			{ "Initial Connect Request", "nvme-tcp.icreq",
+			{ "ICReq", "nvme-tcp.icreq",
 			FT_NONE, BASE_NONE, NULL, 0x0,
 			NULL, HFILL }},
 
@@ -1862,7 +1880,7 @@ proto_register_nvme_tcp(void)
 				NULL, HFILL }},
 
 	    { &hf_nvme_tcp_icresp,
-				{ "Initial Connect Response", "nvme-tcp.icresp",
+				{ "ICResp", "nvme-tcp.icresp",
 				FT_NONE, BASE_NONE, NULL, 0x0,
 				NULL, HFILL }},
 
@@ -1888,7 +1906,7 @@ proto_register_nvme_tcp(void)
 
 	    /* NVMe fabrics command */
 	   { &hf_nvme_fabrics_cmd,
-	    { "Cmd", "nvme-tcp.cmd",
+	    { "NVMe Cmd", "nvme-tcp.cmd",
 	       FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL}
 	   },
 
@@ -1958,14 +1976,14 @@ proto_register_nvme_tcp(void)
 		 FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
 	  },
 
-	  /* NVMe connect command data */
+	  /* NVMe command data */
 	  { &hf_nvme_fabrics_cmd_data,
 	      { "Data", "nvme-tcp.cmd.data",
 		 FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL}
 	  },
 	  { &hf_nvme_fabrics_cmd_connect_data_hostid,
 	      { "Host Identifier", "nvme-tcp.cmd.connect.data.hostid",
-		 FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+		 FT_GUID, BASE_NONE, NULL, 0x0, NULL, HFILL}
 	  },
 	  { &hf_nvme_fabrics_cmd_connect_data_cntlid,
 	      { "Controller ID", "nvme-tcp.cmd.connect.data.cntrlid",
