@@ -1568,8 +1568,10 @@ dissect_nvme_tcp_cqe(tvbuff_t *tvb, packet_info *pinfo, int offset,
 	if (cmd_ctx->n_cmd_ctx.fabric) {
 		dissect_nvme_fabric_cqe(tvb, tree, cmd_ctx, offset);
 	} else {
-		// FIXME: dissect nvme cqe
-		//dissect_nvme_cqe(tvb, pinfo, root_tree, &cmd_ctx->n_cmd_ctx);
+		tvbuff_t *nvme_tvb;
+		/* get incapsuled nvme command */
+		nvme_tvb = tvb_new_subset_remaining(tvb, NVME_TCP_HEADER_SIZE);
+		dissect_nvme_cqe(nvme_tvb, pinfo, tree, &cmd_ctx->n_cmd_ctx);
 	}
 	return;
 not_found:
