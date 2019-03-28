@@ -1505,6 +1505,7 @@ dissect_nvme_tcp_command(tvbuff_t *tvb, packet_info *pinfo, int offset,
 		col_add_fstr(pinfo->cinfo, COL_INFO, "NVMe %s", nvme_get_opcode_string(opcode, queue->n_q_ctx.qid));
 		dissect_nvme_cmd(nvme_tvbuff, pinfo, tree, &queue->n_q_ctx,
 		                   &cmd_ctx->n_cmd_ctx);
+
 		printf("%s:%d frame %u cmd ctx %p opcode %d cmd id %x \n", __func__, __LINE__, pinfo->num, &cmd_ctx->n_cmd_ctx, cmd_ctx->n_cmd_ctx.opcode, cmd_id);
 		// FIXME: Interesting what to do here ??? should i parse data or somethinh ??
 	}
@@ -1605,32 +1606,57 @@ dissect_nvme_tcp_data_pdu(tvbuff_t *tvb, packet_info *pinfo, int offset,
 	return data_length;
 }
 
+//static void
+//nvme_tcp_build_data_key(wmem_tree_key_t *cmd_key, guint32 *cmd_id, guint32 *frame_num)
+//{
+//	cmd_key[0].length = 1;
+//	cmd_key[0].key = cmd_id;
+//	cmd_key[1].length = 1;
+//	cmd_key[1].key = frame_num;
+//}
+
 static void
 dissect_nvme_tcp_c2h_data(tvbuff_t *tvb, packet_info *pinfo, int offset,
-			  proto_tree *tree, struct nvme_tcp_q_ctx *queue)
+			  proto_tree *tree, struct nvme_tcp_q_ctx *queue,
+			  struct tcpinfo *tcpinfo)
 {
 	struct nvme_tcp_cmd_ctx *cmd_ctx;
-	guint16 cmd_id;
+	guint32 cmd_id;
 	guint32 data_length;
 	tvbuff_t *nvme_data;
+	guint32 data_key;
+	//wmem_tree_key_t key[2];
 
 	printf("%s:%d frame %u \n", __func__, __LINE__, pinfo->num);
 	cmd_id = tvb_get_guint16(tvb, offset, ENC_LITTLE_ENDIAN);
 	data_length = dissect_nvme_tcp_data_pdu(tvb, pinfo, offset, tree);
 
+	/* This can identify our packet uniquely  */
+	data_key = tcpinfo->seq + offset;
 	if (!PINFO_FD_VISITED(pinfo)) {
 		cmd_ctx = (struct nvme_tcp_cmd_ctx*)
 			     nvme_lookup_cmd_in_pending_list(&queue->n_q_ctx, cmd_id);
+		if (!cmd_ctx) {
+			goto not_found;
+		}
+
+		/* In order to later lookup for command context lets add this command
+		 * to data responses */
+		cmd_ctx->n_cmd_ctx.data_resp_pkt_num = pinfo->num;
+		//nvme_tcp_build_data_key(key, &cmd_id, &pinfo->num);
+
+		nvme_add_data_response(&queue->n_q_ctx, &cmd_ctx->n_cmd_ctx,
+					data_key);
 	} else {
-		/* Already visited this frame */
 		cmd_ctx = (struct nvme_tcp_cmd_ctx*)
-				nvme_lookup_cmd_in_done_list(pinfo, &queue->n_q_ctx, cmd_id);
+		            nvme_lookup_data_response(pinfo, &queue->n_q_ctx, data_key);
+		if (!cmd_ctx) {
+			printf("%s:%d frame %u not found visited %d cmd id %x \n", __func__, __LINE__, pinfo->num, PINFO_FD_VISITED(pinfo), cmd_id);
+			goto not_found;
+		}
 	}
 
-	if (!cmd_ctx) {
-	    printf("%s:%d frame %u not found visited %d cmd id %x \n", __func__, __LINE__, pinfo->num, PINFO_FD_VISITED(pinfo), cmd_id);
-	    goto not_found;
-	}
+
 
 	//nvme_publish_cqe_to_cmd_link(tree, tvb, hf_nvme_fabrics_cmd_pkt,
 	//				 &cmd_ctx->n_cmd_ctx);
@@ -1652,18 +1678,62 @@ not_found:
 
 static void
 dissect_nvme_tcp_h2c_data(tvbuff_t *tvb, packet_info *pinfo, int offset,
-			  proto_tree *tree, struct nvme_tcp_q_ctx *queue  __attribute__((unused)))
+			  proto_tree *tree, struct nvme_tcp_q_ctx *queue  __attribute__((unused)),
+			  struct tcpinfo *tcpinfo)
 {
-	//struct nvme_tcp_cmd_ctx *cmd_ctx;
-	//guint16 cmd_id;
+	struct nvme_tcp_cmd_ctx *cmd_ctx;
+	guint16 cmd_id;
 	guint32 data_length;
-	//tvbuff_t *nvme_data;
+	guint32 data_key;
+	tvbuff_t *nvme_data;
 
-	//cmd_id = tvb_get_guint16(tvb, offset, ENC_LITTLE_ENDIAN);
+	cmd_id = tvb_get_guint16(tvb, offset, ENC_LITTLE_ENDIAN);
 	data_length = dissect_nvme_tcp_data_pdu(tvb, pinfo, offset, tree);
 
+	//proto_tree_add_item(tree, hf_nvme_tcp_to_host_unknown_data, tvb,
+	//		    offset + 16, data_length, ENC_NA);
+
+	/* This can identify our packet uniquely  */
+	data_key = tcpinfo->seq + offset;
+	if (!PINFO_FD_VISITED(pinfo)) {
+		cmd_ctx = (struct nvme_tcp_cmd_ctx*)
+			     nvme_lookup_cmd_in_pending_list(&queue->n_q_ctx, cmd_id);
+		printf("%s:%d frame %u cmd id  %x cmd %p \n", __func__, __LINE__, pinfo->num, cmd_id, cmd_ctx);
+		if (!cmd_ctx) {
+			printf("%s:%d NOT FOUND !!!! frame %u cmd id  %x cmd %p \n", __func__, __LINE__, pinfo->num, cmd_id, cmd_ctx);
+			goto not_found;
+		}
+
+		/* In order to later lookup for command context lets add this command
+		 * to data responses */
+		//cmd_ctx->n_cmd_ctx.data_req_pkt_num = pinfo->num;
+		//nvme_tcp_build_data_key(key, &cmd_id, &pinfo->num);
+		/* Fill this for "adding data request call, this will be the key to fetch data request later */
+		cmd_ctx->n_cmd_ctx.remote_key = data_key;
+		nvme_add_data_request(pinfo, &queue->n_q_ctx, &cmd_ctx->n_cmd_ctx, (void*)cmd_ctx);
+	} else {
+		cmd_ctx = (struct nvme_tcp_cmd_ctx*)
+				nvme_lookup_data_request(&queue->n_q_ctx, data_key);
+		if (!cmd_ctx) {
+			printf("%s:%d frame %u not found visited %d cmd id %x \n", __func__, __LINE__, pinfo->num, PINFO_FD_VISITED(pinfo), cmd_id);
+			goto not_found;
+		}
+	}
+
+	nvme_data = tvb_new_subset_remaining(tvb, NVME_TCP_DATA_PDU_SIZE);
+	printf("%s:%d frame %u cmd ctx %p opcode %d cmd id %x \n", __func__, __LINE__, pinfo->num, &cmd_ctx->n_cmd_ctx, cmd_ctx->n_cmd_ctx.opcode, cmd_id);
+	dissect_nvme_data_response(nvme_data, pinfo, tree, &queue->n_q_ctx,
+					   &cmd_ctx->n_cmd_ctx, data_length);
+
+//	void
+//	dissect_nvme_data_response(tvbuff_t *nvme_tvb, packet_info *pinfo, proto_tree *root_tree,
+//	                 struct nvme_q_ctx *q_ctx, struct nvme_cmd_ctx *cmd_ctx, guint len)
+
+	return;
+not_found:
 	proto_tree_add_item(tree, hf_nvme_tcp_to_host_unknown_data, tvb,
 			    offset + 16, data_length, ENC_NA);
+
 }
 
 static void
@@ -1732,6 +1802,7 @@ not_found:
 
 static int
 dissect_nvme_tcp_pdu(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), proto_tree *tree __attribute__((unused)), void* data _U_ __attribute__((unused))) {
+	struct tcpinfo *tcpinfo = (struct tcpinfo *)data;
 	conversation_t  *conversation;
 	struct nvme_tcp_q_ctx *q_ctx;
 	proto_item      *ti;
@@ -1812,10 +1883,10 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), 
 		dissect_nvme_tcp_cqe(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree, q_ctx);
 		break;
 	case nvme_tcp_c2h_data:
-		dissect_nvme_tcp_c2h_data(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree, q_ctx);
+		dissect_nvme_tcp_c2h_data(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree, q_ctx, tcpinfo);
 		break;
 	case nvme_tcp_h2c_data:
-		dissect_nvme_tcp_h2c_data(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree, q_ctx);
+		dissect_nvme_tcp_h2c_data(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree, q_ctx, tcpinfo);
 		break;
 	case nvme_tcp_h2c_term:
 	case nvme_tcp_c2h_term:
