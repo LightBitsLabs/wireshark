@@ -86,6 +86,7 @@ static dissector_handle_t nvmet_tcp_handle;
 //
 #define NVME_FABRICS_TCP "NVMe Fabrics TCP"
 #define NVME_TCP_HEADER_SIZE 8
+#define NVME_TCP_DATA_PDU_SIZE 24
 //
 //#define NVME_FABRIC_CMD_SIZE NVME_CMD_SIZE
 //#define NVME_FABRIC_CQE_SIZE NVME_CQE_SIZE
@@ -441,6 +442,16 @@ static int hf_nvme_fabrics_cqe_connect_authreq = -1;
 static int hf_nvme_fabrics_cqe_connect_rsvd = -1;
 static int hf_nvme_fabrics_cqe_prop_set_rsvd = -1;
 static int hf_nvme_tcp_to_host_unknown_data = -1;
+
+
+/* Data response fields */
+static int hf_nvme_tcp_data_pdu = -1;
+static int hf_nvme_tcp_data_pdu_ttag = -1;
+static int hf_nvme_tcp_data_pdu_data_offset = -1;
+static int hf_nvme_tcp_data_pdu_data_length = -1;
+static int hf_nvme_tcp_data_pdu_data_resvd = -1;
+static int hf_nvme_gen_data = -1;
+
 //
 ///* tracking Cmd and its respective CQE */
 //static int hf_nvme_rdma_cmd_pkt = -1;
@@ -457,6 +468,7 @@ static gint ett_nvme_tcp_icqreq = -1;
 static gint ett_nvme_tcp_icqresp = -1;
 static gint ett_nvme_fabrics = -1;
 static gint ett_nvme_fabrics_data = -1;
+static gint ett_nvme_data = -1;
 static range_t *gPORT_RANGE;
 //
 //static conversation_infiniband_data *get_conversion_data(conversation_t *conv)
@@ -1531,7 +1543,7 @@ dissect_nvme_fabric_cqe(tvbuff_t *nvme_tvb,
 			offset + 8, 2, ENC_NA);
 	proto_tree_add_item(cqe_tree, hf_nvme_fabrics_cqe_rsvd, nvme_tvb,
 			offset + 10, 2, ENC_LITTLE_ENDIAN);
-	proto_tree_add_item(cqe_tree, hf_nvme_fabrics_cqe_cid, nvme_tvb,
+	proto_tree_add_item(cqe_tree, hf_nvme_fabrics_cmd_cid, nvme_tvb,
 			offset + 12, 2, ENC_LITTLE_ENDIAN);
 	proto_tree_add_item(cqe_tree, hf_nvme_fabrics_cqe_status, nvme_tvb,
 			offset + 14, 2, ENC_LITTLE_ENDIAN);
@@ -1539,6 +1551,60 @@ dissect_nvme_fabric_cqe(tvbuff_t *nvme_tvb,
 			offset + 14, 2, ENC_LITTLE_ENDIAN);
 }
 
+static void
+dissect_nvme_tcp_c2h_data(tvbuff_t *tvb, packet_info *pinfo, int offset,
+			  proto_tree *tree, struct nvme_tcp_q_ctx *queue)
+{
+	struct nvme_tcp_cmd_ctx *cmd_ctx;
+	//proto_item *ti;
+	guint16 cmd_id;
+	guint32 data_length;
+	//proto_tree *cmd_tree;
+	tvbuff_t *nvme_data;
+
+	// FIXME: set length of the pdu .. we know it
+	//ti = proto_tree_add_item(tree, proto_nvme_tcp, tvb, 0,
+	//			-1, ENC_NA);
+	//cmd_tree = proto_item_add_subtree(ti, ett_nvme_data);
+
+	col_set_str(pinfo->cinfo, COL_PROTOCOL, "NVMe");
+	cmd_id = tvb_get_guint16(tvb, offset, ENC_LITTLE_ENDIAN);
+	printf("frame %d %s:%d cmd id %x offset %u \n", pinfo->num, __func__, __LINE__, cmd_id, offset);
+	proto_tree_add_item(tree, hf_nvme_fabrics_cmd_cid, tvb,
+			    offset, 2, ENC_LITTLE_ENDIAN);
+
+	proto_tree_add_item(tree, hf_nvme_tcp_data_pdu_ttag, tvb,
+			    offset + 2, 2, ENC_LITTLE_ENDIAN);
+
+	proto_tree_add_item(tree, hf_nvme_tcp_data_pdu_data_offset, tvb,
+			    offset + 4, 4, ENC_LITTLE_ENDIAN);
+
+	data_length = tvb_get_guint32(tvb, offset + 8, ENC_LITTLE_ENDIAN);
+	proto_tree_add_item(tree, hf_nvme_tcp_data_pdu_data_length, tvb,
+			    offset + 8, 4, ENC_LITTLE_ENDIAN);
+
+	proto_tree_add_item(tree, hf_nvme_tcp_data_pdu_data_resvd, tvb,
+			    offset + 12, 4, ENC_NA);
+
+	cmd_ctx = (struct nvme_tcp_cmd_ctx*)
+		     nvme_lookup_cmd_in_pending_list(&queue->n_q_ctx, cmd_id);
+
+	if (!cmd_ctx)
+		goto not_found;
+
+	/* get incapsuled nvme data */
+	nvme_data = tvb_new_subset_remaining(tvb, NVME_TCP_DATA_PDU_SIZE);
+
+	dissect_nvme_data_response(nvme_data, pinfo, tree, &queue->n_q_ctx,
+				   &cmd_ctx->n_cmd_ctx, data_length);
+
+	// FIXME: we need to link this to request ????
+	return;
+not_found:
+	// What is the size of data ???
+	proto_tree_add_item(tree, hf_nvme_tcp_to_host_unknown_data, tvb,
+			    offset + 16, data_length, ENC_NA);
+}
 
 static void
 dissect_nvme_tcp_cqe(tvbuff_t *tvb, packet_info *pinfo, int offset,
@@ -1565,6 +1631,7 @@ dissect_nvme_tcp_cqe(tvbuff_t *tvb, packet_info *pinfo, int offset,
 
 	nvme_update_cmd_end_info(pinfo, &cmd_ctx->n_cmd_ctx);
 
+	printf("%s:%d frame %d fabrics %d ?\n", __func__, __LINE__, pinfo->num, cmd_ctx->n_cmd_ctx.fabric);
 	if (cmd_ctx->n_cmd_ctx.fabric) {
 		dissect_nvme_fabric_cqe(tvb, tree, cmd_ctx, offset);
 	} else {
@@ -1644,7 +1711,7 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), 
 	/* This is the total length of the payload minus nvme header size
 	 * Needed to */
 	incapsuled_data_size = plen - hlen;
-	printf("Plen %u hlen %u capsule len %u \n", plen, hlen, incapsuled_data_size);
+	printf("frame %u Plen %u hlen %u capsule len %u packet type %u\n", pinfo->num, plen, hlen, incapsuled_data_size, packet_type);
 
 	switch (packet_type) {
 	case nvme_tcp_icreq:
@@ -1662,8 +1729,11 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), 
 	case nvme_tcp_rsp:
 		dissect_nvme_tcp_cqe(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree, q_ctx);
 		break;
+	case nvme_tcp_c2h_data:
+		dissect_nvme_tcp_c2h_data(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree, q_ctx);
+		break;
 	default:
-		printf("Error in parsing...\n");
+		printf("Error in parsing... unkown packet type %u\n", packet_type);
 		// FIXME: add here error info
 
 	}
@@ -2144,10 +2214,10 @@ proto_register_nvme_tcp(void)
             { "Reserved", "nvme-tcp.cqe.rsvd",
                FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
         },
-        { &hf_nvme_fabrics_cqe_cid,
-            { "Command ID", "nvme-tcp.cqe.cid",
-               FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
-        },
+//        { &hf_nvme_fabrics_cqe_cid,
+//            { "Command ID", "nvme-tcp.cqe.cid",
+//               FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
+//        },
         { &hf_nvme_fabrics_cqe_status,
             { "Status", "nvme-tcp.cqe.status",
                FT_UINT16, BASE_HEX, NULL, 0xfffe, NULL, HFILL}
@@ -2196,13 +2266,41 @@ proto_register_nvme_tcp(void)
               FT_UINT16, BASE_HEX, NULL, 0x0,
               "Qid on which command is issued", HFILL }
         },
+
+
+	/* NVMe TCP data response */
+	{ &hf_nvme_tcp_data_pdu,
+	            { "Cqe", "nvme-tcp.data",
+	               FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	},
+	{ &hf_nvme_tcp_data_pdu_ttag,
+		    { "Transfer Tag", "nvme-tcp.data.ttag",
+		FT_UINT16, BASE_HEX, NULL, 0x0, "Transfer tag (controller generated)", HFILL}
+	},
+	{ &hf_nvme_tcp_data_pdu_data_offset,
+		{ "Data Offset", "nvme-tcp.data.offset",
+		FT_UINT32, BASE_DEC, NULL, 0x0, "Offset from the start of the command data", HFILL}
+	},
+	{ &hf_nvme_tcp_data_pdu_data_length,
+		{ "Data Length", "nvme-tcp.data.length",
+		FT_UINT32, BASE_DEC, NULL, 0x0, "Length of the data stream", HFILL}
+	},
+	{ &hf_nvme_tcp_data_pdu_data_resvd,
+		{ "Reserved", "nvme-tcp.data.rsvd",
+		FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	},
+	{ &hf_nvme_gen_data,
+	            { "Nvme Data", "nvme.data",
+	              FT_BYTES, BASE_NONE, NULL, 0, NULL, HFILL}
+	},
     };
     static gint *ett[] = {
         &ett_nvme_tcp,
 	&ett_nvme_tcp_icqreq,
 	&ett_nvme_tcp_icqresp,
 	&ett_nvme_fabrics,
-	&ett_nvme_fabrics_data
+	&ett_nvme_fabrics_data,
+	&ett_nvme_data
     };
 //
      proto_nvme_tcp = proto_register_protocol("NVM Express Fabrics TCP",
