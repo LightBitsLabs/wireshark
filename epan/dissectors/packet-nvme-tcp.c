@@ -1575,25 +1575,17 @@ dissect_nvme_fabric_cqe(tvbuff_t *nvme_tvb,
 			offset + 14, 2, ENC_LITTLE_ENDIAN);
 }
 
-static void
-dissect_nvme_tcp_c2h_data(tvbuff_t *tvb, packet_info *pinfo, int offset,
-			  proto_tree *tree, struct nvme_tcp_q_ctx *queue)
+static guint32
+dissect_nvme_tcp_data_pdu(tvbuff_t *tvb, packet_info *pinfo, int offset,
+		  	  proto_tree *tree)
 {
-	struct nvme_tcp_cmd_ctx *cmd_ctx;
-	//proto_item *ti;
-	guint16 cmd_id;
+	//struct nvme_tcp_cmd_ctx *cmd_ctx;
+	//guint16 cmd_id;
 	guint32 data_length;
-	//proto_tree *cmd_tree;
-	tvbuff_t *nvme_data;
-
-	// FIXME: set length of the pdu .. we know it
-	//ti = proto_tree_add_item(tree, proto_nvme_tcp, tvb, 0,
-	//			-1, ENC_NA);
-	//cmd_tree = proto_item_add_subtree(ti, ett_nvme_data);
+	//tvbuff_t *nvme_data;
 
 	col_set_str(pinfo->cinfo, COL_PROTOCOL, "NVMe");
-	cmd_id = tvb_get_guint16(tvb, offset, ENC_LITTLE_ENDIAN);
-	//printf("frame %d %s:%d cmd id %x offset %u \n", pinfo->num, __func__, __LINE__, cmd_id, offset);
+	//cmd_id = tvb_get_guint16(tvb, offset, ENC_LITTLE_ENDIAN);
 	proto_tree_add_item(tree, hf_nvme_fabrics_cmd_cid, tvb,
 			    offset, 2, ENC_LITTLE_ENDIAN);
 
@@ -1610,6 +1602,21 @@ dissect_nvme_tcp_c2h_data(tvbuff_t *tvb, packet_info *pinfo, int offset,
 	proto_tree_add_item(tree, hf_nvme_tcp_data_pdu_data_resvd, tvb,
 			    offset + 12, 4, ENC_NA);
 
+	return data_length;
+}
+
+static void
+dissect_nvme_tcp_c2h_data(tvbuff_t *tvb, packet_info *pinfo, int offset,
+			  proto_tree *tree, struct nvme_tcp_q_ctx *queue)
+{
+	struct nvme_tcp_cmd_ctx *cmd_ctx;
+	guint16 cmd_id;
+	guint32 data_length;
+	tvbuff_t *nvme_data;
+
+	printf("%s:%d frame %u \n", __func__, __LINE__, pinfo->num);
+	cmd_id = tvb_get_guint16(tvb, offset, ENC_LITTLE_ENDIAN);
+	data_length = dissect_nvme_tcp_data_pdu(tvb, pinfo, offset, tree);
 
 	if (!PINFO_FD_VISITED(pinfo)) {
 		cmd_ctx = (struct nvme_tcp_cmd_ctx*)
@@ -1620,8 +1627,10 @@ dissect_nvme_tcp_c2h_data(tvbuff_t *tvb, packet_info *pinfo, int offset,
 				nvme_lookup_cmd_in_done_list(pinfo, &queue->n_q_ctx, cmd_id);
 	}
 
-	if (!cmd_ctx)
+	if (!cmd_ctx) {
+	    printf("%s:%d frame %u not found visited %d cmd id %x \n", __func__, __LINE__, pinfo->num, PINFO_FD_VISITED(pinfo), cmd_id);
 	    goto not_found;
+	}
 
 	//nvme_publish_cqe_to_cmd_link(tree, tvb, hf_nvme_fabrics_cmd_pkt,
 	//				 &cmd_ctx->n_cmd_ctx);
@@ -1642,6 +1651,22 @@ not_found:
 }
 
 static void
+dissect_nvme_tcp_h2c_data(tvbuff_t *tvb, packet_info *pinfo, int offset,
+			  proto_tree *tree, struct nvme_tcp_q_ctx *queue  __attribute__((unused)))
+{
+	//struct nvme_tcp_cmd_ctx *cmd_ctx;
+	//guint16 cmd_id;
+	guint32 data_length;
+	//tvbuff_t *nvme_data;
+
+	//cmd_id = tvb_get_guint16(tvb, offset, ENC_LITTLE_ENDIAN);
+	data_length = dissect_nvme_tcp_data_pdu(tvb, pinfo, offset, tree);
+
+	proto_tree_add_item(tree, hf_nvme_tcp_to_host_unknown_data, tvb,
+			    offset + 16, data_length, ENC_NA);
+}
+
+static void
 dissect_nvme_tcp_cqe(tvbuff_t *tvb, packet_info *pinfo, int offset,
 		          proto_tree *tree, struct nvme_tcp_q_ctx *queue)
 {
@@ -1656,18 +1681,21 @@ dissect_nvme_tcp_cqe(tvbuff_t *tvb, packet_info *pinfo, int offset,
 	if (!PINFO_FD_VISITED(pinfo)) {
 		cmd_ctx = (struct nvme_tcp_cmd_ctx*)
 			             nvme_lookup_cmd_in_pending_list(&queue->n_q_ctx, cmd_id);
-		if (!cmd_ctx)
+		if (!cmd_ctx) {
+			printf("SASHA !!!!\n");
 			goto not_found;
+		}
 		/* we have already seen this cqe, or an identical one */
 		if (cmd_ctx->n_cmd_ctx.cqe_pkt_num) {
 		    printf("ALREADY SEEN??? Frame %d: %s:%d cmd id %x\n", pinfo->num, __func__, __LINE__, cmd_id);
 		    goto not_found;
 		}
 		cmd_ctx->n_cmd_ctx.cqe_pkt_num = pinfo->num;
+		printf("%s:%d frame %u move cmd %p cmd_id %x to done list\n", __func__, __LINE__, pinfo->num, &cmd_ctx->n_cmd_ctx, cmd_id);
 		nvme_add_cmd_cqe_to_done_list(&queue->n_q_ctx, &cmd_ctx->n_cmd_ctx, cmd_id);
 
 	} else {
-		 cmd_ctx = (struct nvme_tcp_cmd_ctx*)
+		cmd_ctx = (struct nvme_tcp_cmd_ctx*)
 				nvme_lookup_cmd_in_done_list(pinfo, &queue->n_q_ctx, cmd_id);
 		if (!cmd_ctx) {
 			printf("!!!! ERROR NOT IN DONE LIST \n");
@@ -1686,10 +1714,16 @@ dissect_nvme_tcp_cqe(tvbuff_t *tvb, packet_info *pinfo, int offset,
 		nvme_tvb = tvb_new_subset_remaining(tvb, NVME_TCP_HEADER_SIZE);
 		col_append_sep_fstr(pinfo->cinfo, COL_INFO, " | ", "NVMe %s: Response",
 				nvme_get_opcode_string(cmd_ctx->n_cmd_ctx.opcode, queue->n_q_ctx.qid));
+		/* In order to search according to nvme-tcp.cmd.cid lets add command
+		* id also in nvme-tcp tree*/
+		proto_tree_add_item(tree, hf_nvme_fabrics_cmd_cid, nvme_tvb,
+				    12, 2, ENC_LITTLE_ENDIAN);
+
 		dissect_nvme_cqe(nvme_tvb, pinfo, tree, &cmd_ctx->n_cmd_ctx);
 	}
 	return;
 not_found:
+	printf("!!!! CQE NOT FOUND !!! for cmd %x\n", cmd_id);
 	proto_tree_add_item(tree, hf_nvme_tcp_to_host_unknown_data, tvb,
 			    offset, NVME_FABRIC_CQE_SIZE, ENC_NA);
 }
@@ -1759,7 +1793,7 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), 
 	/* This is the total length of the payload minus nvme header size
 	 * Needed to */
 	incapsuled_data_size = plen - hlen;
-	//printf("frame %u Plen %u hlen %u capsule len %u packet type %u\n", pinfo->num, plen, hlen, incapsuled_data_size, packet_type);
+	printf("frame %u Plen %u hlen %u capsule len %u packet type %u\n", pinfo->num, plen, hlen, incapsuled_data_size, packet_type);
 
 	switch (packet_type) {
 	case nvme_tcp_icreq:
@@ -1780,6 +1814,12 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), 
 	case nvme_tcp_c2h_data:
 		dissect_nvme_tcp_c2h_data(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree, q_ctx);
 		break;
+	case nvme_tcp_h2c_data:
+		dissect_nvme_tcp_h2c_data(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree, q_ctx);
+		break;
+	case nvme_tcp_h2c_term:
+	case nvme_tcp_c2h_term:
+	case nvme_tcp_r2t:
 	default:
 		printf("Error in parsing... unkown packet type %u\n", packet_type);
 		// FIXME: add here error info
@@ -2393,6 +2433,7 @@ proto_reg_handoff_nvme_tcp(void)
       //tcp_handler = find_dissector_add_dependency("tcp", proto_nvme_tcp);
       //proto_tcp = dissector_handle_get_protocol_index(tcp_handler);
       dissector_add_uint_with_preference("tcp.port", 4420, nvmet_tcp_handle);
+
 }
 
 /*
