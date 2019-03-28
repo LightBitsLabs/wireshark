@@ -1493,7 +1493,7 @@ dissect_nvme_tcp_command(tvbuff_t *tvb, packet_info *pinfo, int offset,
 		cmd_ctx->n_cmd_ctx.fabric = TRUE;
 		fctype = tvb_get_guint8(tvb, offset + 4);
 		dissect_nvme_fabric_cmd(tvb, tree, queue, cmd_ctx, offset);
-		col_add_fstr(pinfo->cinfo, COL_INFO, "NVMe Fabrics: %s",
+		col_add_fstr(pinfo->cinfo, COL_INFO, "Fabrics %s Request",
 				val_to_str(fctype, nvme_fabrics_cmd_type_vals, "Unknown FcType"));
 		if (incapsuled_data_size > 0) {
 			dissect_nvme_fabric_data(tvb, tree, incapsuled_data_size, cmd_ctx->fctype, offset + NVME_FABRIC_CMD_SIZE);
@@ -1503,6 +1503,7 @@ dissect_nvme_tcp_command(tvbuff_t *tvb, packet_info *pinfo, int offset,
 		cmd_ctx->n_cmd_ctx.fabric = FALSE;
 		/* get incapsuled nvme command */
 		nvme_tvbuff = tvb_new_subset_remaining(tvb, NVME_TCP_HEADER_SIZE);
+		col_add_fstr(pinfo->cinfo, COL_INFO, "NVMe %s", nvme_get_opcode_string(opcode, queue->n_q_ctx.qid));
 		dissect_nvme_cmd(nvme_tvbuff, pinfo, tree, &queue->n_q_ctx,
 		                   &cmd_ctx->n_cmd_ctx);
 		// FIXME: Interesting what to do here ??? should i parse data or somethinh ??
@@ -1537,6 +1538,7 @@ dissect_nvme_fabrics_cqe_status_8B(proto_tree *cqe_tree __attribute__((unused)),
 
 static void
 dissect_nvme_fabric_cqe(tvbuff_t *nvme_tvb,
+			packet_info *pinfo,
                         proto_tree *nvme_tree,
                         struct nvme_tcp_cmd_ctx *cmd_ctx,
 			int offset)
@@ -1549,6 +1551,9 @@ dissect_nvme_fabric_cqe(tvbuff_t *nvme_tvb,
 
 	proto_item_append_text(ti, " (For Cmd: %s)", val_to_str(cmd_ctx->fctype,
 			       nvme_fabrics_cmd_type_vals, "Unknown Cmd"));
+
+	col_add_fstr(pinfo->cinfo, COL_INFO, "Fabrics %s Response",
+			val_to_str(cmd_ctx->fctype, nvme_fabrics_cmd_type_vals, "Unknown FcType"));
 
 	cqe_tree = proto_item_add_subtree(ti, ett_nvme_tcp);
 
@@ -1664,7 +1669,7 @@ dissect_nvme_tcp_cqe(tvbuff_t *tvb, packet_info *pinfo, int offset,
 
 	printf("%s:%d frame %d fabrics %d ?\n", __func__, __LINE__, pinfo->num, cmd_ctx->n_cmd_ctx.fabric);
 	if (cmd_ctx->n_cmd_ctx.fabric) {
-		dissect_nvme_fabric_cqe(tvb, tree, cmd_ctx, offset);
+		dissect_nvme_fabric_cqe(tvb, pinfo, tree, cmd_ctx, offset);
 	} else {
 		tvbuff_t *nvme_tvb;
 		/* get incapsuled nvme command */
