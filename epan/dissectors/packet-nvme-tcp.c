@@ -1610,11 +1610,18 @@ dissect_nvme_tcp_c2h_data(tvbuff_t *tvb, packet_info *pinfo, int offset,
 	proto_tree_add_item(tree, hf_nvme_tcp_data_pdu_data_resvd, tvb,
 			    offset + 12, 4, ENC_NA);
 
-	cmd_ctx = (struct nvme_tcp_cmd_ctx*)
-		     nvme_lookup_cmd_in_pending_list(&queue->n_q_ctx, cmd_id);
+
+	if (!PINFO_FD_VISITED(pinfo)) {
+		cmd_ctx = (struct nvme_tcp_cmd_ctx*)
+			     nvme_lookup_cmd_in_pending_list(&queue->n_q_ctx, cmd_id);
+	} else {
+		/* Already visited this frame */
+		cmd_ctx = (struct nvme_tcp_cmd_ctx*)
+				nvme_lookup_cmd_in_done_list(pinfo, &queue->n_q_ctx, cmd_id);
+	}
 
 	if (!cmd_ctx)
-		goto not_found;
+	    goto not_found;
 
 	//nvme_publish_cqe_to_cmd_link(tree, tvb, hf_nvme_fabrics_cmd_pkt,
 	//				 &cmd_ctx->n_cmd_ctx);
