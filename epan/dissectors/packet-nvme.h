@@ -101,6 +101,13 @@ dissect_nvme_cqe(tvbuff_t *nvme_tvb, packet_info *pinfo, proto_tree *root_tree,
 int
 nvme_is_io_queue_opcode(guint8  opcode);
 
+/**
+ * Returns string representation of opcode according
+ * to opcode and queue id
+ */
+const gchar *
+nvme_get_opcode_string(guint8  opcode, guint16 qid);
+
 #endif
 
 /*
