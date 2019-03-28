@@ -678,6 +678,31 @@ dissect_nvme_cmd(tvbuff_t *nvme_tvb, packet_info *pinfo, proto_tree *root_tree,
     }
 }
 
+int
+nvme_is_io_queue_opcode(guint8  opcode)
+{
+	return ((opcode == NVME_IOQ_OPC_FLUSH) ||
+		(opcode == NVME_IOQ_OPC_WRITE) ||
+		(opcode == NVME_IOQ_OPC_READ) ||
+		(opcode == NVME_IOQ_OPC_WRITE_UNCORRECTABLE) ||
+		(opcode == NVME_IOQ_OPC_COMPARE) ||
+		(opcode == NVME_IOQ_OPC_WRITE_ZEROS) ||
+		(opcode == NVME_IOQ_OPC_DATASET_MGMT) ||
+		(opcode == NVME_IOQ_OPC_RESV_REG) ||
+		(opcode == NVME_IOQ_OPC_RESV_REPORT) ||
+		(opcode == NVME_IOQ_OPC_RESV_ACQUIRE) ||
+		(opcode == NVME_IOQ_OPC_RESV_RELEASE));
+}
+
+const gchar *nvme_get_opcode_string(guint8  opcode, guint16 qid)
+{
+	if (qid)
+		return val_to_str(opcode, ioq_opc_tbl, "Reserved");
+	else
+		return val_to_str(opcode, aq_opc_tbl, "Reserved");
+}
+
+
 void
 dissect_nvme_cqe(tvbuff_t *nvme_tvb, packet_info *pinfo, proto_tree *root_tree,
                  struct nvme_cmd_ctx *cmd_ctx)
