@@ -278,6 +278,7 @@ static int hf_nvme_fabrics_cmd_connect_data_hostnqn = -1;
 static int hf_nvme_fabrics_cmd_connect_data_rsvd5 = -1;
 
 
+static int hf_nvme_tcp_r2t_pdu = -1;
 static int hf_nvme_tcp_r2t_offset = -1;
 static int hf_nvme_tcp_r2t_length = -1;
 static int hf_nvme_tcp_r2t_resvd = -1;
@@ -1808,11 +1809,11 @@ nvme_tcp_dissect_r2t(tvbuff_t *tvb, packet_info *pinfo, int offset, proto_tree *
 	proto_item *tf;
 	proto_item *r2t_tree;
 
-	tf = proto_tree_add_item(tree, hf_nvme_tcp_icreq, tvb, offset, -1, ENC_NA);
-	r2t_tree = proto_item_add_subtree(tf, ett_nvme_tcp_icqreq);
+	tf = proto_tree_add_item(tree, hf_nvme_tcp_r2t_pdu, tvb, offset, -1, ENC_NA);
+	r2t_tree = proto_item_add_subtree(tf, ett_nvme_tcp);
 
 	col_append_sep_fstr(pinfo->cinfo, COL_INFO, " | ", "Ready To Transfer");
-	proto_tree_add_item(r2t_tree, hf_nvme_tcp_icreq_pfv, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+	//proto_tree_add_item(r2t_tree, hf_nvme_tcp_icreq_pfv, tvb, offset, 2, ENC_LITTLE_ENDIAN);
 
 	proto_tree_add_item(r2t_tree, hf_nvme_fabrics_cmd_cid, tvb,
 			    offset, 2, ENC_LITTLE_ENDIAN);
@@ -2484,6 +2485,10 @@ proto_register_nvme_tcp(void)
 	              FT_BYTES, BASE_NONE, NULL, 0, NULL, HFILL}
 	},
 	/* NVMEe TCP R2T pdu */
+	{ &hf_nvme_tcp_r2t_pdu,
+		            { "R2T", "nvme-tcp.r2t",
+		               FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	},
 	{ &hf_nvme_tcp_r2t_offset,
 		{ "R2T Offset", "nvme-tcp.r2t.offset",
 		FT_UINT32, BASE_DEC, NULL, 0x0, "offset from the start of the command data", HFILL}
