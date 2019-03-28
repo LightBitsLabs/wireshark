@@ -181,6 +181,8 @@ enum nvmf_fabrics_opcode {
 };
 
 #define NVME_FABRIC_CMD_SIZE NVME_CMD_SIZE
+#define NVME_FABRIC_CQE_SIZE NVME_CQE_SIZE
+
 
 
 //
@@ -347,9 +349,9 @@ static int hf_nvme_fabrics_cmd_prop_attr_set_rsvd3 = -1;
 
 
 /* tracking Cmd and its respective CQE */
-//static int hf_nvme_rdma_cmd_pkt = -1;
-static int hf_nvme_tcp_cqe_pkt = -1;
-//static int hf_nvme_rdma_cmd_latency = -1;
+static int hf_nvme_fabrics_cmd_pkt = -1;
+static int hf_nvme_fabrics_cqe_pkt = -1;
+static int hf_nvme_fabrics_cmd_latency = -1;
 static int hf_nvme_fabrics_cmd_qid = -1;
 
 
@@ -425,21 +427,20 @@ static int hf_nvme_fabrics_cmd_qid = -1;
 //static int hf_nvme_rdma_cmd_generic_rsvd1 = -1;
 //static int hf_nvme_rdma_cmd_generic_field = -1;
 //
-///* NVMe Fabric CQE */
-//static int hf_nvme_rdma_cqe = -1;
-//static int hf_nvme_rdma_cqe_sts = -1;
-//static int hf_nvme_rdma_cqe_sqhd = -1;
-//static int hf_nvme_rdma_cqe_rsvd = -1;
-//static int hf_nvme_rdma_cqe_cid = -1;
-//static int hf_nvme_rdma_cqe_status = -1;
-//static int hf_nvme_rdma_cqe_status_rsvd = -1;
-//
-//static int hf_nvme_rdma_cqe_connect_cntlid = -1;
-//static int hf_nvme_rdma_cqe_connect_authreq = -1;
-//static int hf_nvme_rdma_cqe_connect_rsvd = -1;
-//static int hf_nvme_rdma_cqe_prop_set_rsvd = -1;
-//
-//static int hf_nvme_rdma_to_host_unknown_data = -1;
+/* NVMe Fabric CQE */
+static int hf_nvme_fabrics_cqe = -1;
+static int hf_nvme_fabrics_cqe_sts = -1;
+static int hf_nvme_fabrics_cqe_sqhd = -1;
+static int hf_nvme_fabrics_cqe_rsvd = -1;
+static int hf_nvme_fabrics_cqe_cid = -1;
+static int hf_nvme_fabrics_cqe_status = -1;
+static int hf_nvme_fabrics_cqe_status_rsvd = -1;
+
+static int hf_nvme_fabrics_cqe_connect_cntlid = -1;
+static int hf_nvme_fabrics_cqe_connect_authreq = -1;
+static int hf_nvme_fabrics_cqe_connect_rsvd = -1;
+static int hf_nvme_fabrics_cqe_prop_set_rsvd = -1;
+static int hf_nvme_tcp_to_host_unknown_data = -1;
 //
 ///* tracking Cmd and its respective CQE */
 //static int hf_nvme_rdma_cmd_pkt = -1;
@@ -1377,7 +1378,7 @@ dissect_nvme_fabric_cmd(tvbuff_t *nvme_tvb, proto_tree *nvme_tree,
                                    offset, 1, ENC_NA);
     proto_item_append_text(opc_item, "%s", " Fabric Cmd");
 
-    nvme_publish_cmd_to_cqe_link(cmd_tree, nvme_tvb, hf_nvme_tcp_cqe_pkt,
+    nvme_publish_cmd_to_cqe_link(cmd_tree, nvme_tvb, hf_nvme_fabrics_cqe_pkt,
                                  &cmd_ctx->n_cmd_ctx);
 
     proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_rsvd1, nvme_tvb,
@@ -1479,6 +1480,103 @@ dissect_nvme_tcp_command(tvbuff_t *tvb, packet_info *pinfo, int offset,
 }
 
 
+static void
+dissect_nvme_fabrics_cqe_status_8B(proto_tree *cqe_tree __attribute__((unused)), tvbuff_t *cqe_tvb __attribute__((unused)),
+                                  struct nvme_tcp_cmd_ctx *cmd_ctx __attribute__((unused)), int offset __attribute__((unused)))
+{
+    switch (cmd_ctx->fctype) {
+    case nvme_fabrics_type_connect:
+        proto_tree_add_item(cqe_tree, hf_nvme_fabrics_cqe_connect_cntlid, cqe_tvb,
+                            offset + 0, 2, ENC_LITTLE_ENDIAN);
+        proto_tree_add_item(cqe_tree, hf_nvme_fabrics_cqe_connect_authreq, cqe_tvb,
+                            offset + 2, 2, ENC_LITTLE_ENDIAN);
+        proto_tree_add_item(cqe_tree, hf_nvme_fabrics_cqe_connect_rsvd, cqe_tvb,
+                            offset + 4, 4, ENC_NA);
+        break;
+    case nvme_fabrics_type_property_get:
+        proto_tree_add_item(cqe_tree, hf_nvme_fabrics_cqe_sts, cqe_tvb,
+                            offset + 0, 8, ENC_LITTLE_ENDIAN);
+        break;
+    case nvme_fabrics_type_property_set:
+        proto_tree_add_item(cqe_tree, hf_nvme_fabrics_cqe_prop_set_rsvd, cqe_tvb,
+                            offset + 0, 8, ENC_NA);
+        break;
+    };
+}
+
+static void
+dissect_nvme_fabric_cqe(tvbuff_t *nvme_tvb,
+                        proto_tree *nvme_tree,
+                        struct nvme_tcp_cmd_ctx *cmd_ctx,
+			int offset)
+{
+	proto_tree *cqe_tree;
+	proto_item *ti;
+
+	ti = proto_tree_add_item(nvme_tree, hf_nvme_fabrics_cqe, nvme_tvb,
+				 0, NVME_FABRIC_CQE_SIZE, ENC_NA);
+
+	proto_item_append_text(ti, " (For Cmd: %s)", val_to_str(cmd_ctx->fctype,
+			       nvme_fabrics_cmd_type_vals, "Unknown Cmd"));
+
+	cqe_tree = proto_item_add_subtree(ti, ett_nvme_tcp);
+
+	nvme_publish_cqe_to_cmd_link(cqe_tree, nvme_tvb, hf_nvme_fabrics_cmd_pkt,
+				 &cmd_ctx->n_cmd_ctx);
+	nvme_publish_cmd_latency(cqe_tree, &cmd_ctx->n_cmd_ctx, hf_nvme_fabrics_cmd_latency);
+
+	dissect_nvme_fabrics_cqe_status_8B(cqe_tree, nvme_tvb, cmd_ctx, offset);
+
+	proto_tree_add_item(cqe_tree, hf_nvme_fabrics_cqe_sqhd, nvme_tvb,
+			offset + 8, 2, ENC_NA);
+	proto_tree_add_item(cqe_tree, hf_nvme_fabrics_cqe_rsvd, nvme_tvb,
+			offset + 10, 2, ENC_LITTLE_ENDIAN);
+	proto_tree_add_item(cqe_tree, hf_nvme_fabrics_cqe_cid, nvme_tvb,
+			offset + 12, 2, ENC_LITTLE_ENDIAN);
+	proto_tree_add_item(cqe_tree, hf_nvme_fabrics_cqe_status, nvme_tvb,
+			offset + 14, 2, ENC_LITTLE_ENDIAN);
+	proto_tree_add_item(cqe_tree, hf_nvme_fabrics_cqe_status_rsvd, nvme_tvb,
+			offset + 14, 2, ENC_LITTLE_ENDIAN);
+}
+
+
+static void
+dissect_nvme_tcp_cqe(tvbuff_t *tvb, packet_info *pinfo, int offset,
+		          proto_tree *tree, struct nvme_tcp_q_ctx *queue)
+{
+	struct nvme_tcp_cmd_ctx *cmd_ctx;
+	guint16 cmd_id;
+
+	cmd_id = tvb_get_guint16(tvb, offset + 12, ENC_LITTLE_ENDIAN);
+	cmd_ctx = (struct nvme_tcp_cmd_ctx*)
+	             nvme_lookup_cmd_in_pending_list(&queue->n_q_ctx, cmd_id);
+
+	// FIXME: we can dissect fields even if we did not find relecant command
+	// consuder doing it
+	if (!cmd_ctx)
+		goto not_found;
+
+	/* we have already seen this cqe, or an identical one */
+	if (cmd_ctx->n_cmd_ctx.cqe_pkt_num)
+	    goto not_found;
+
+	cmd_ctx->n_cmd_ctx.cqe_pkt_num = pinfo->num;
+	nvme_add_cmd_cqe_to_done_list(&queue->n_q_ctx, &cmd_ctx->n_cmd_ctx, cmd_id);
+
+	nvme_update_cmd_end_info(pinfo, &cmd_ctx->n_cmd_ctx);
+
+	if (cmd_ctx->n_cmd_ctx.fabric) {
+		dissect_nvme_fabric_cqe(tvb, tree, cmd_ctx, offset);
+	} else {
+		// FIXME: dissect nvme cqe
+		//dissect_nvme_cqe(tvb, pinfo, root_tree, &cmd_ctx->n_cmd_ctx);
+	}
+	return;
+not_found:
+	proto_tree_add_item(tree, hf_nvme_tcp_to_host_unknown_data, tvb,
+			    offset, NVME_FABRIC_CQE_SIZE, ENC_NA);
+}
+
 
 
 static int
@@ -1558,6 +1656,9 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), 
 	case nvme_tcp_cmd:
 		//col_set_str(pinfo->cinfo, COL_INFO, "");
 		dissect_nvme_tcp_command(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree, q_ctx, incapsuled_data_size);
+		break;
+	case nvme_tcp_rsp:
+		dissect_nvme_tcp_cqe(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree, q_ctx);
 		break;
 	default:
 		printf("Error in parsing...\n");
@@ -1709,12 +1810,6 @@ proto_register_nvme_tcp(void)
 	   { &hf_nvme_fabrics_cmd_opc,
 	       { "Opcode", "nvme-tcp.cmd.opc",
 		  FT_UINT8, BASE_HEX, NULL, 0x0, NULL, HFILL}
-	   },
-
-	   { &hf_nvme_tcp_cqe_pkt,
-	       { "Fabric Cqe in", "nvme-tcp.cqe_pkt",
-		 FT_FRAMENUM, BASE_NONE, NULL, 0,
-		 "The Cqe for this transaction is in this frame", HFILL }
 	   },
 	   { &hf_nvme_fabrics_cmd_rsvd1,
 	       { "Reserved", "nvme-tcp.cmd.rsvd",
@@ -2031,69 +2126,69 @@ proto_register_nvme_tcp(void)
 //               FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
 //        },
 //        /* IB RDMA NVMe Response fields */
-//        { &hf_nvme_rdma_cqe,
-//            { "Cqe", "nvme-rdma.cqe",
-//               FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cqe_sts,
-//            { "Cmd specific Status", "nvme-rdma.cqe.sts",
-//               FT_UINT64, BASE_HEX, NULL, 0x0, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cqe_sqhd,
-//            { "SQ Head Pointer", "nvme-rdma.cqe.sqhd",
-//               FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cqe_rsvd,
-//            { "Reserved", "nvme-rdma.cqe.rsvd",
-//               FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cqe_cid,
-//            { "Command ID", "nvme-rdma.cqe.cid",
-//               FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cqe_status,
-//            { "Status", "nvme-rdma.cqe.status",
-//               FT_UINT16, BASE_HEX, NULL, 0xfffe, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cqe_status_rsvd,
-//            { "Reserved", "nvme-rdma.cqe.status.rsvd",
-//               FT_UINT16, BASE_HEX, NULL, 0x1, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cqe_connect_cntlid,
-//            { "Controller ID", "nvme-rdma.cqe.connect.cntrlid",
-//               FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cqe_connect_authreq,
-//            { "Authentication Required", "nvme-rdma.cqe.connect.authreq",
-//               FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cqe_connect_rsvd,
-//            { "Reserved", "nvme-rdma.cqe.connect.rsvd",
-//               FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cqe_prop_set_rsvd,
-//            { "Reserved", "nvme-rdma.cqe.prop_set.rsvd",
-//               FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_to_host_unknown_data,
-//            { "Dissection unsupported", "nvme-rdma.unknown_data",
-//               FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
-//        },
-//        { &hf_nvme_rdma_cmd_pkt,
-//            { "Fabric Cmd in", "nvme-rdma.cmd_pkt",
-//              FT_FRAMENUM, BASE_NONE, NULL, 0,
-//              "The Cmd for this transaction is in this frame", HFILL }
-//        },
-//        { &hf_nvme_rdma_cqe_pkt,
-//            { "Fabric Cqe in", "nvme-rdma.cqe_pkt",
-//              FT_FRAMENUM, BASE_NONE, NULL, 0,
-//              "The Cqe for this transaction is in this frame", HFILL }
-//        },
-//        { &hf_nvme_rdma_cmd_latency,
-//            { "Cmd Latency", "nvme-rdma.cmd_latency",
-//              FT_DOUBLE, BASE_NONE, NULL, 0x0,
-//              "The time between the command and completion, in usec", HFILL }
-//        },
+        { &hf_nvme_fabrics_cqe,
+            { "Cqe", "nvme-tcp.cqe",
+               FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cqe_sts,
+            { "Cmd specific Status", "nvme-tcp.cqe.sts",
+               FT_UINT64, BASE_HEX, NULL, 0x0, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cqe_sqhd,
+            { "SQ Head Pointer", "nvme-tcp.cqe.sqhd",
+               FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cqe_rsvd,
+            { "Reserved", "nvme-tcp.cqe.rsvd",
+               FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cqe_cid,
+            { "Command ID", "nvme-tcp.cqe.cid",
+               FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cqe_status,
+            { "Status", "nvme-tcp.cqe.status",
+               FT_UINT16, BASE_HEX, NULL, 0xfffe, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cqe_status_rsvd,
+            { "Reserved", "nvme-tcp.cqe.status.rsvd",
+               FT_UINT16, BASE_HEX, NULL, 0x1, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cqe_connect_cntlid,
+            { "Controller ID", "nvme-tcp.cqe.connect.cntrlid",
+               FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cqe_connect_authreq,
+            { "Authentication Required", "nvme-tcp.cqe.connect.authreq",
+               FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cqe_connect_rsvd,
+            { "Reserved", "nvme-tcp.cqe.connect.rsvd",
+               FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+        },
+        { &hf_nvme_fabrics_cqe_prop_set_rsvd,
+            { "Reserved", "nvme-tcp.cqe.prop_set.rsvd",
+               FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+        },
+	{ &hf_nvme_tcp_to_host_unknown_data,
+	    { "Dissection unsupported", "nvme-tcp.unknown_data",
+	       FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
+	},
+        { &hf_nvme_fabrics_cmd_pkt,
+            { "Fabric Cmd in", "nvme-tcp.cmd_pkt",
+              FT_FRAMENUM, BASE_NONE, NULL, 0,
+              "The Cmd for this transaction is in this frame", HFILL }
+        },
+        { &hf_nvme_fabrics_cqe_pkt,
+            { "Fabric Cqe in", "nvme-tcp.cqe_pkt",
+              FT_FRAMENUM, BASE_NONE, NULL, 0,
+              "The Cqe for this transaction is in this frame", HFILL }
+        },
+        { &hf_nvme_fabrics_cmd_latency,
+            { "Cmd Latency", "nvme-tcp.cmd_latency",
+              FT_DOUBLE, BASE_NONE, NULL, 0x0,
+              "The time between the command and completion, in usec", HFILL }
+        },
         { &hf_nvme_fabrics_cmd_qid,
             { "Cmd Qid", "nvme-tcp.cmd.qid",
               FT_UINT16, BASE_HEX, NULL, 0x0,
