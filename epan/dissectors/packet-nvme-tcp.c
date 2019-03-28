@@ -1684,6 +1684,8 @@ dissect_nvme_tcp_cqe(tvbuff_t *tvb, packet_info *pinfo, int offset,
 		tvbuff_t *nvme_tvb;
 		/* get incapsuled nvme command */
 		nvme_tvb = tvb_new_subset_remaining(tvb, NVME_TCP_HEADER_SIZE);
+		col_append_sep_fstr(pinfo->cinfo, COL_INFO, " | ", "NVMe %s: Response",
+				nvme_get_opcode_string(cmd_ctx->n_cmd_ctx.opcode, queue->n_q_ctx.qid));
 		dissect_nvme_cqe(nvme_tvb, pinfo, tree, &cmd_ctx->n_cmd_ctx);
 	}
 	return;
@@ -1726,7 +1728,7 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), 
 	}
 
 
-	col_set_str(pinfo->cinfo, COL_PROTOCOL, NVME_FABRICS_TCP);
+
 	// FIXME: it is possible to have multiple nvme pdus in single frame ..
 	// so we need to figure this out as well
 
@@ -1834,6 +1836,8 @@ dissect_nvme_tcp(tvbuff_t *tvb __attribute__((unused)), packet_info *pinfo __att
 //     return TRUE;
 
 	//printf("we are here %s:%d\n", __FILE__,__LINE__);
+	col_clear(pinfo->cinfo, COL_INFO);
+	col_set_str(pinfo->cinfo, COL_PROTOCOL, NVME_FABRICS_TCP);
 	tcp_dissect_pdus(tvb, pinfo, tree, /*mysql_desegment*/ TRUE, NVME_TCP_HEADER_SIZE,
 			 get_nvme_tcp_pdu_len, dissect_nvme_tcp_pdu, data);
 
