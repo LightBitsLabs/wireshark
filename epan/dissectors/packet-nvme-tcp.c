@@ -1140,7 +1140,7 @@ get_nvme_tcp_pdu_len(packet_info *pinfo __attribute__((unused)), tvbuff_t *tvb _
 {
 
 	guint pdu_len = tvb_get_letohl(tvb, offset + PDU_LEN_OFFSET_FROM_HEADER);
-	printf("pdu len %d\n", pdu_len);
+	//printf("pdu len %d\n", pdu_len);
 	return pdu_len;
 //	/* Regular packet header: length (3) + sequence number (1) */
 //	conversation_t	   *conversation;
@@ -1660,7 +1660,7 @@ dissect_nvme_tcp_cqe(tvbuff_t *tvb, packet_info *pinfo, int offset,
 			goto not_found;
 		/* we have already seen this cqe, or an identical one */
 		if (cmd_ctx->n_cmd_ctx.cqe_pkt_num) {
-		    //printf("ALREADY SEEN??? Frame %d: %s:%d cmd id %x\n", pinfo->num, __func__, __LINE__, cmd_id);
+		    printf("ALREADY SEEN??? Frame %d: %s:%d cmd id %x\n", pinfo->num, __func__, __LINE__, cmd_id);
 		    goto not_found;
 		}
 		cmd_ctx->n_cmd_ctx.cqe_pkt_num = pinfo->num;
@@ -1684,11 +1684,6 @@ dissect_nvme_tcp_cqe(tvbuff_t *tvb, packet_info *pinfo, int offset,
 		tvbuff_t *nvme_tvb;
 		/* get incapsuled nvme command */
 		nvme_tvb = tvb_new_subset_remaining(tvb, NVME_TCP_HEADER_SIZE);
-
-		/* In order to search according to nvme-tcp.cmd.cid lets add command
-		 * id also in nvme-tcp tree*/
-		proto_tree_add_item(tree, hf_nvme_fabrics_cmd_cid, nvme_tvb,
-				    12, 2, ENC_LITTLE_ENDIAN);
 		dissect_nvme_cqe(nvme_tvb, pinfo, tree, &cmd_ctx->n_cmd_ctx);
 	}
 	return;
