@@ -278,6 +278,10 @@ static int hf_nvme_fabrics_cmd_connect_data_hostnqn = -1;
 static int hf_nvme_fabrics_cmd_connect_data_rsvd5 = -1;
 
 
+static int hf_nvme_tcp_r2t_offset = -1;
+static int hf_nvme_tcp_r2t_length = -1;
+static int hf_nvme_tcp_r2t_resvd = -1;
+
 
 //static int hf_nvme_fabrics_cmd_connect_rsvd1 = -1;
 //static int hf_nvme_fabrics_cmd_connect_rsvd1 = -1;
@@ -446,7 +450,7 @@ static int hf_nvme_tcp_to_host_unknown_data = -1;
 
 /* Data response fields */
 static int hf_nvme_tcp_data_pdu = -1;
-static int hf_nvme_tcp_data_pdu_ttag = -1;
+static int hf_nvme_tcp_pdu_ttag = -1;
 static int hf_nvme_tcp_data_pdu_data_offset = -1;
 static int hf_nvme_tcp_data_pdu_data_length = -1;
 static int hf_nvme_tcp_data_pdu_data_resvd = -1;
@@ -1590,7 +1594,7 @@ dissect_nvme_tcp_data_pdu(tvbuff_t *tvb, packet_info *pinfo, int offset,
 	proto_tree_add_item(tree, hf_nvme_fabrics_cmd_cid, tvb,
 			    offset, 2, ENC_LITTLE_ENDIAN);
 
-	proto_tree_add_item(tree, hf_nvme_tcp_data_pdu_ttag, tvb,
+	proto_tree_add_item(tree, hf_nvme_tcp_pdu_ttag, tvb,
 			    offset + 2, 2, ENC_LITTLE_ENDIAN);
 
 	proto_tree_add_item(tree, hf_nvme_tcp_data_pdu_data_offset, tvb,
@@ -1798,6 +1802,29 @@ not_found:
 			    offset, NVME_FABRIC_CQE_SIZE, ENC_NA);
 }
 
+static void
+nvme_tcp_dissect_r2t(tvbuff_t *tvb, packet_info *pinfo, int offset, proto_tree *tree)
+{
+	proto_item *tf;
+	proto_item *r2t_tree;
+
+	tf = proto_tree_add_item(tree, hf_nvme_tcp_icreq, tvb, offset, -1, ENC_NA);
+	r2t_tree = proto_item_add_subtree(tf, ett_nvme_tcp_icqreq);
+
+	col_append_sep_fstr(pinfo->cinfo, COL_INFO, " | ", "Ready To Transfer");
+	proto_tree_add_item(r2t_tree, hf_nvme_tcp_icreq_pfv, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+
+	proto_tree_add_item(r2t_tree, hf_nvme_fabrics_cmd_cid, tvb,
+			    offset, 2, ENC_LITTLE_ENDIAN);
+	proto_tree_add_item(r2t_tree, hf_nvme_tcp_pdu_ttag, tvb,
+				offset + 2, 2, ENC_LITTLE_ENDIAN);
+	proto_tree_add_item(r2t_tree, hf_nvme_tcp_r2t_offset, tvb,
+				offset + 4, 4, ENC_LITTLE_ENDIAN);
+	proto_tree_add_item(r2t_tree, hf_nvme_tcp_r2t_length, tvb,
+				offset + 8, 4, ENC_LITTLE_ENDIAN);
+	proto_tree_add_item(r2t_tree, hf_nvme_tcp_r2t_resvd, tvb,
+				offset + 12, 4, ENC_NA);
+}
 
 
 static int
@@ -1888,9 +1915,11 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), 
 	case nvme_tcp_h2c_data:
 		dissect_nvme_tcp_h2c_data(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree, q_ctx, tcpinfo);
 		break;
+	case nvme_tcp_r2t:
+		nvme_tcp_dissect_r2t(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree);
+		break;
 	case nvme_tcp_h2c_term:
 	case nvme_tcp_c2h_term:
-	case nvme_tcp_r2t:
 	default:
 		printf("Error in parsing... unkown packet type %u\n", packet_type);
 		// FIXME: add here error info
@@ -2434,8 +2463,8 @@ proto_register_nvme_tcp(void)
 	            { "Cqe", "nvme-tcp.data",
 	               FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL}
 	},
-	{ &hf_nvme_tcp_data_pdu_ttag,
-		    { "Transfer Tag", "nvme-tcp.data.ttag",
+	{ &hf_nvme_tcp_pdu_ttag,
+		    { "Transfer Tag", "nvme-tcp.ttag",
 		FT_UINT16, BASE_HEX, NULL, 0x0, "Transfer tag (controller generated)", HFILL}
 	},
 	{ &hf_nvme_tcp_data_pdu_data_offset,
@@ -2453,6 +2482,19 @@ proto_register_nvme_tcp(void)
 	{ &hf_nvme_gen_data,
 	            { "Nvme Data", "nvme.data",
 	              FT_BYTES, BASE_NONE, NULL, 0, NULL, HFILL}
+	},
+	/* NVMEe TCP R2T pdu */
+	{ &hf_nvme_tcp_r2t_offset,
+		{ "R2T Offset", "nvme-tcp.r2t.offset",
+		FT_UINT32, BASE_DEC, NULL, 0x0, "offset from the start of the command data", HFILL}
+	},
+	{ &hf_nvme_tcp_r2t_length,
+		{ "R2T Length", "nvme-tcp.r2t.length",
+		FT_UINT32, BASE_DEC, NULL, 0x0, "Length of the data stream", HFILL}
+	},
+	{ &hf_nvme_tcp_r2t_resvd,
+		{ "Reserved", "nvme-tcp.r2t.rsvd",
+		FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL}
 	},
     };
     static gint *ett[] = {
