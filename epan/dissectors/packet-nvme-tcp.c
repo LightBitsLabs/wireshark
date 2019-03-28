@@ -433,7 +433,7 @@ static int hf_nvme_fabrics_cqe = -1;
 static int hf_nvme_fabrics_cqe_sts = -1;
 static int hf_nvme_fabrics_cqe_sqhd = -1;
 static int hf_nvme_fabrics_cqe_rsvd = -1;
-static int hf_nvme_fabrics_cqe_cid = -1;
+//static int hf_nvme_fabrics_cqe_cid = -1;
 static int hf_nvme_fabrics_cqe_status = -1;
 static int hf_nvme_fabrics_cqe_status_rsvd = -1;
 
@@ -1489,6 +1489,7 @@ dissect_nvme_tcp_command(tvbuff_t *tvb, packet_info *pinfo, int offset,
 		                   &cmd_ctx->n_cmd_ctx);
 		// FIXME: Interesting what to do here ??? should i parse data or somethinh ??
 	}
+	printf("%s:%d Frame %d cmd id %x is fabrics %d\n", __func__, __LINE__, pinfo->num, cmd_id, cmd_ctx->n_cmd_ctx.fabric);
 }
 
 
@@ -1599,6 +1600,7 @@ dissect_nvme_tcp_c2h_data(tvbuff_t *tvb, packet_info *pinfo, int offset,
 				   &cmd_ctx->n_cmd_ctx, data_length);
 
 	// FIXME: we need to link this to request ????
+
 	return;
 not_found:
 	// What is the size of data ???
@@ -1614,20 +1616,31 @@ dissect_nvme_tcp_cqe(tvbuff_t *tvb, packet_info *pinfo, int offset,
 	guint16 cmd_id;
 
 	cmd_id = tvb_get_guint16(tvb, offset + 12, ENC_LITTLE_ENDIAN);
-	cmd_ctx = (struct nvme_tcp_cmd_ctx*)
-	             nvme_lookup_cmd_in_pending_list(&queue->n_q_ctx, cmd_id);
+	printf("Frame %d: %s:%d cmd id %x\n", pinfo->num, __func__, __LINE__, cmd_id);
 
-	// FIXME: we can dissect fields even if we did not find relecant command
-	// consuder doing it
-	if (!cmd_ctx)
-		goto not_found;
+	/* wireshark will dissect packet several times when display is refreshed
+	 * we need to track state changes only once */
+	if (!PINFO_FD_VISITED(pinfo)) {
+		cmd_ctx = (struct nvme_tcp_cmd_ctx*)
+			             nvme_lookup_cmd_in_pending_list(&queue->n_q_ctx, cmd_id);
+		if (!cmd_ctx)
+			goto not_found;
+		/* we have already seen this cqe, or an identical one */
+		if (cmd_ctx->n_cmd_ctx.cqe_pkt_num) {
+		    printf("ALREADY SEEN??? Frame %d: %s:%d cmd id %x\n", pinfo->num, __func__, __LINE__, cmd_id);
+		    goto not_found;
+		}
+		cmd_ctx->n_cmd_ctx.cqe_pkt_num = pinfo->num;
+		nvme_add_cmd_cqe_to_done_list(&queue->n_q_ctx, &cmd_ctx->n_cmd_ctx, cmd_id);
 
-	/* we have already seen this cqe, or an identical one */
-	if (cmd_ctx->n_cmd_ctx.cqe_pkt_num)
-	    goto not_found;
-
-	cmd_ctx->n_cmd_ctx.cqe_pkt_num = pinfo->num;
-	nvme_add_cmd_cqe_to_done_list(&queue->n_q_ctx, &cmd_ctx->n_cmd_ctx, cmd_id);
+	} else {
+		 cmd_ctx = (struct nvme_tcp_cmd_ctx*)
+				nvme_lookup_cmd_in_done_list(pinfo, &queue->n_q_ctx, cmd_id);
+		if (!cmd_ctx) {
+			printf("!!!! ERROR NOT IN DONE LIST \n");
+			goto not_found;
+		}
+	}
 
 	nvme_update_cmd_end_info(pinfo, &cmd_ctx->n_cmd_ctx);
 
