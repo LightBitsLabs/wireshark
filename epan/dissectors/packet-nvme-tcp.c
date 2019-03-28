@@ -1473,7 +1473,6 @@ bind_cmd_to_qctx(packet_info *pinfo, struct nvme_q_ctx *q_ctx,
 //    return ctx;
 }
 
-
 static void
 dissect_nvme_tcp_command(tvbuff_t *tvb, packet_info *pinfo, int offset,
 		        proto_tree *tree, struct nvme_tcp_q_ctx *queue,
@@ -1506,9 +1505,10 @@ dissect_nvme_tcp_command(tvbuff_t *tvb, packet_info *pinfo, int offset,
 		col_add_fstr(pinfo->cinfo, COL_INFO, "NVMe %s", nvme_get_opcode_string(opcode, queue->n_q_ctx.qid));
 		dissect_nvme_cmd(nvme_tvbuff, pinfo, tree, &queue->n_q_ctx,
 		                   &cmd_ctx->n_cmd_ctx);
+		printf("%s:%d frame %u cmd ctx %p opcode %d cmd id %x \n", __func__, __LINE__, pinfo->num, &cmd_ctx->n_cmd_ctx, cmd_ctx->n_cmd_ctx.opcode, cmd_id);
 		// FIXME: Interesting what to do here ??? should i parse data or somethinh ??
 	}
-	printf("%s:%d Frame %d cmd id %x is fabrics %d\n", __func__, __LINE__, pinfo->num, cmd_id, cmd_ctx->n_cmd_ctx.fabric);
+	//printf("%s:%d Frame %d cmd id %x is fabrics %d\n", __func__, __LINE__, pinfo->num, cmd_id, cmd_ctx->n_cmd_ctx.fabric);
 }
 
 
@@ -1593,7 +1593,7 @@ dissect_nvme_tcp_c2h_data(tvbuff_t *tvb, packet_info *pinfo, int offset,
 
 	col_set_str(pinfo->cinfo, COL_PROTOCOL, "NVMe");
 	cmd_id = tvb_get_guint16(tvb, offset, ENC_LITTLE_ENDIAN);
-	printf("frame %d %s:%d cmd id %x offset %u \n", pinfo->num, __func__, __LINE__, cmd_id, offset);
+	//printf("frame %d %s:%d cmd id %x offset %u \n", pinfo->num, __func__, __LINE__, cmd_id, offset);
 	proto_tree_add_item(tree, hf_nvme_fabrics_cmd_cid, tvb,
 			    offset, 2, ENC_LITTLE_ENDIAN);
 
@@ -1616,9 +1616,12 @@ dissect_nvme_tcp_c2h_data(tvbuff_t *tvb, packet_info *pinfo, int offset,
 	if (!cmd_ctx)
 		goto not_found;
 
+	//nvme_publish_cqe_to_cmd_link(tree, tvb, hf_nvme_fabrics_cmd_pkt,
+	//				 &cmd_ctx->n_cmd_ctx);
 	/* get incapsuled nvme data */
 	nvme_data = tvb_new_subset_remaining(tvb, NVME_TCP_DATA_PDU_SIZE);
 
+	printf("%s:%d frame %u cmd ctx %p opcode %d cmd id %x \n", __func__, __LINE__, pinfo->num, &cmd_ctx->n_cmd_ctx, cmd_ctx->n_cmd_ctx.opcode, cmd_id);
 	dissect_nvme_data_response(nvme_data, pinfo, tree, &queue->n_q_ctx,
 				   &cmd_ctx->n_cmd_ctx, data_length);
 
@@ -1639,7 +1642,7 @@ dissect_nvme_tcp_cqe(tvbuff_t *tvb, packet_info *pinfo, int offset,
 	guint16 cmd_id;
 
 	cmd_id = tvb_get_guint16(tvb, offset + 12, ENC_LITTLE_ENDIAN);
-	printf("Frame %d: %s:%d cmd id %x\n", pinfo->num, __func__, __LINE__, cmd_id);
+	//printf("Frame %d: %s:%d cmd id %x\n", pinfo->num, __func__, __LINE__, cmd_id);
 
 	/* wireshark will dissect packet several times when display is refreshed
 	 * we need to track state changes only once */
@@ -1650,7 +1653,7 @@ dissect_nvme_tcp_cqe(tvbuff_t *tvb, packet_info *pinfo, int offset,
 			goto not_found;
 		/* we have already seen this cqe, or an identical one */
 		if (cmd_ctx->n_cmd_ctx.cqe_pkt_num) {
-		    printf("ALREADY SEEN??? Frame %d: %s:%d cmd id %x\n", pinfo->num, __func__, __LINE__, cmd_id);
+		    //printf("ALREADY SEEN??? Frame %d: %s:%d cmd id %x\n", pinfo->num, __func__, __LINE__, cmd_id);
 		    goto not_found;
 		}
 		cmd_ctx->n_cmd_ctx.cqe_pkt_num = pinfo->num;
@@ -1667,13 +1670,18 @@ dissect_nvme_tcp_cqe(tvbuff_t *tvb, packet_info *pinfo, int offset,
 
 	nvme_update_cmd_end_info(pinfo, &cmd_ctx->n_cmd_ctx);
 
-	printf("%s:%d frame %d fabrics %d ?\n", __func__, __LINE__, pinfo->num, cmd_ctx->n_cmd_ctx.fabric);
+	//printf("%s:%d frame %d fabrics %d ?\n", __func__, __LINE__, pinfo->num, cmd_ctx->n_cmd_ctx.fabric);
 	if (cmd_ctx->n_cmd_ctx.fabric) {
 		dissect_nvme_fabric_cqe(tvb, pinfo, tree, cmd_ctx, offset);
 	} else {
 		tvbuff_t *nvme_tvb;
 		/* get incapsuled nvme command */
 		nvme_tvb = tvb_new_subset_remaining(tvb, NVME_TCP_HEADER_SIZE);
+
+		/* In order to search according to nvme-tcp.cmd.cid lets add command
+		 * id also in nvme-tcp tree*/
+		proto_tree_add_item(tree, hf_nvme_fabrics_cmd_cid, nvme_tvb,
+				    12, 2, ENC_LITTLE_ENDIAN);
 		dissect_nvme_cqe(nvme_tvb, pinfo, tree, &cmd_ctx->n_cmd_ctx);
 	}
 	return;
@@ -1747,7 +1755,7 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb, packet_info *pinfo __attribute__((unused)), 
 	/* This is the total length of the payload minus nvme header size
 	 * Needed to */
 	incapsuled_data_size = plen - hlen;
-	printf("frame %u Plen %u hlen %u capsule len %u packet type %u\n", pinfo->num, plen, hlen, incapsuled_data_size, packet_type);
+	//printf("frame %u Plen %u hlen %u capsule len %u packet type %u\n", pinfo->num, plen, hlen, incapsuled_data_size, packet_type);
 
 	switch (packet_type) {
 	case nvme_tcp_icreq:
@@ -1823,7 +1831,7 @@ dissect_nvme_tcp(tvbuff_t *tvb __attribute__((unused)), packet_info *pinfo __att
 //     disect_nvme_tcp_on_stream(tvb, pinfo, tree, nvme_tree, q_ctx);
 //     return TRUE;
 
-	printf("we are here %s:%d\n", __FILE__,__LINE__);
+	//printf("we are here %s:%d\n", __FILE__,__LINE__);
 	tcp_dissect_pdus(tvb, pinfo, tree, /*mysql_desegment*/ TRUE, NVME_TCP_HEADER_SIZE,
 			 get_nvme_tcp_pdu_len, dissect_nvme_tcp_pdu, data);
 
@@ -1925,7 +1933,7 @@ proto_register_nvme_tcp(void)
 	   },
 
 	   { &hf_nvme_fabrics_cmd_cid,
-	               { "Command ID", "nvme-tcp.cmd.cid",
+	               { "Command ID", "nvme.cmd.cid",
 	                  FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL}
 	   },
 
@@ -2366,7 +2374,7 @@ proto_register_nvme_tcp(void)
                                     &gPORT_RANGE, MAX_TCP_PORT);
      //expert_nvme_tcp = expert_register_protocol(proto_nvme_tcp);
      nvmet_tcp_handle = register_dissector("nvme-tcp", dissect_nvme_tcp, proto_nvme_tcp);
-     printf("we are here %s:%d\n", __FILE__,__LINE__);
+     //printf("we are here %s:%d\n", __FILE__,__LINE__);
 }
 
 void
@@ -2375,7 +2383,7 @@ proto_reg_handoff_nvme_tcp(void)
 //    heur_dissector_add("tcp", dissect_nvme_tcp,
 //                       "NVMe Fabrics TCP packets",
 //                       "nvme_tcp", proto_nvme_tcp, HEURISTIC_ENABLE);
-      printf("we are here %s:%d\n", __FILE__,__LINE__);
+      //printf("we are here %s:%d\n", __FILE__,__LINE__);
       //tcp_handler = find_dissector_add_dependency("tcp", proto_nvme_tcp);
       //proto_tcp = dissector_handle_get_protocol_index(tcp_handler);
       dissector_add_uint_with_preference("tcp.port", 4420, nvmet_tcp_handle);
