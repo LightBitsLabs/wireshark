@@ -414,6 +414,16 @@ nvme_publish_cqe_to_cmd_link(proto_tree *cqe_tree, tvbuff_t *nvme_tvb,
 }
 
 void
+nvme_publish_data_pdu_to_cmd_link(proto_tree *pdu_tree, tvbuff_t *nvme_tvb,
+                           int hf_index, struct nvme_cmd_ctx *cmd_ctx)
+{
+    proto_item *cmd_ref_item;
+    cmd_ref_item = proto_tree_add_uint(pdu_tree, hf_index,
+                             nvme_tvb, 0, 0, cmd_ctx->cmd_pkt_num);
+    PROTO_ITEM_SET_GENERATED(cmd_ref_item);
+}
+
+void
 nvme_publish_cmd_to_cqe_link(proto_tree *cmd_tree, tvbuff_t *cmd_tvb,
                              int hf_index, struct nvme_cmd_ctx *cmd_ctx)
 {
