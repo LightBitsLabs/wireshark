@@ -52,6 +52,7 @@ since version 3.0.0:
 [commaize]
 --
 evolved Common Public Radio Interface (eCPRI)
+NVM Express over Fabrics for TCP (nvme-tcp)
 --
 
 === Updated Protocol Support
