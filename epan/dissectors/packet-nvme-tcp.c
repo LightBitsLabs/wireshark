@@ -83,6 +83,20 @@ static int hf_nvme_tcp_hlen = -1;
 static int hf_nvme_tcp_pdo = -1;
 static int hf_nvme_tcp_plen = -1;
 
+/* NVMe tcp icreq/icresp fields */
+static int hf_nvme_tcp_icreq = -1;
+static int hf_nvme_tcp_icreq_pfv = -1;
+static int hf_nvme_tcp_icreq_maxr2t = -1;
+static int hf_nvme_tcp_icreq_hpda = -1;
+static int hf_nvme_tcp_icreq_digest = -1;
+static int hf_nvme_tcp_icresp = -1;
+static int hf_nvme_tcp_icresp_pfv = -1;
+static int hf_nvme_tcp_icresp_cpda = -1;
+static int hf_nvme_tcp_icresp_digest = -1;
+static int hf_nvme_tcp_icresp_maxdata = -1;
+
+static int hf_nvme_tcp_unknown_data = -1;
+
 static int hf_nvme_fabrics_cmd_qid = -1;
 
 static gint ett_nvme_tcp = -1;
@@ -96,6 +110,52 @@ get_nvme_tcp_pdu_len(packet_info *pinfo _U_,
     return tvb_get_letohl(tvb, offset + PDU_LEN_OFFSET_FROM_HEADER);
 }
 
+static void
+dissect_nvme_tcp_icreq(tvbuff_t *tvb,
+                       packet_info *pinfo,
+                       int offset,
+                       proto_tree *tree)
+{
+    proto_item *tf;
+    proto_item *icreq_tree;
+
+    col_set_str(pinfo->cinfo, COL_INFO, "Initialize Connection Request");
+    tf = proto_tree_add_item(tree, hf_nvme_tcp_icreq, tvb, offset, 8, ENC_NA);
+    icreq_tree = proto_item_add_subtree(tf, ett_nvme_tcp);
+
+    proto_tree_add_item(icreq_tree, hf_nvme_tcp_icreq_pfv, tvb, offset, 2,
+            ENC_LITTLE_ENDIAN);
+    proto_tree_add_item(icreq_tree, hf_nvme_tcp_icreq_maxr2t, tvb, offset + 2,
+            4, ENC_LITTLE_ENDIAN);
+    proto_tree_add_item(icreq_tree, hf_nvme_tcp_icreq_hpda, tvb, offset + 6, 1,
+            ENC_NA);
+    proto_tree_add_item(icreq_tree, hf_nvme_tcp_icreq_digest, tvb, offset + 7,
+            1, ENC_NA);
+}
+
+static void
+dissect_nvme_tcp_icresp(tvbuff_t *tvb,
+                        packet_info *pinfo,
+                        int offset,
+                        proto_tree *tree)
+{
+    proto_item *tf;
+    proto_item *icresp_tree;
+
+    col_set_str(pinfo->cinfo, COL_INFO, "Initialize Connection Response");
+    tf = proto_tree_add_item(tree, hf_nvme_tcp_icresp, tvb, offset, 8, ENC_NA);
+    icresp_tree = proto_item_add_subtree(tf, ett_nvme_tcp);
+
+    proto_tree_add_item(icresp_tree, hf_nvme_tcp_icresp_pfv, tvb, offset, 2,
+            ENC_LITTLE_ENDIAN);
+    proto_tree_add_item(icresp_tree, hf_nvme_tcp_icresp_cpda, tvb, offset + 2,
+            1, ENC_NA);
+    proto_tree_add_item(icresp_tree, hf_nvme_tcp_icresp_digest, tvb, offset + 3,
+            1, ENC_NA);
+    proto_tree_add_item(icresp_tree, hf_nvme_tcp_icresp_maxdata, tvb,
+            offset + 4, 4, ENC_LITTLE_ENDIAN);
+}
+
 static int
 dissect_nvme_tcp_pdu(tvbuff_t *tvb,
                      packet_info *pinfo,
@@ -106,7 +166,11 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb,
     struct nvme_tcp_q_ctx *q_ctx;
     proto_item *ti;
     int offset = 0;
+    int nvme_tcp_pdu_offset;
     proto_tree *nvme_tcp_tree;
+    guint packet_type;
+    guint8 hlen;
+    guint32 plen;
 
     conversation = find_or_create_conversation(pinfo);
     q_ctx = (struct nvme_tcp_q_ctx *)
@@ -133,18 +197,46 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb,
         nvme_publish_qid(nvme_tcp_tree, hf_nvme_fabrics_cmd_qid,
                 q_ctx->n_q_ctx.qid);
 
+    packet_type = tvb_get_guint8(tvb, offset);
     proto_tree_add_item(nvme_tcp_tree, hf_nvme_tcp_type, tvb, offset, 1,
             ENC_NA);
     proto_tree_add_item(nvme_tcp_tree, hf_nvme_tcp_flags, tvb, offset + 1, 1,
             ENC_NA);
+    hlen = tvb_get_gint8(tvb, offset + 2);
     proto_tree_add_item(nvme_tcp_tree, hf_nvme_tcp_hlen, tvb, offset + 2, 1,
             ENC_NA);
     proto_tree_add_item(nvme_tcp_tree, hf_nvme_tcp_pdo, tvb, offset + 3, 1,
             ENC_NA);
+    plen = tvb_get_letohl(tvb, offset + 4);
     proto_tree_add_item(nvme_tcp_tree, hf_nvme_tcp_plen, tvb, offset + 4, 4,
             ENC_LITTLE_ENDIAN);
     col_set_str(pinfo->cinfo, COL_PROTOCOL, NVME_FABRICS_TCP);
 
+    nvme_tcp_pdu_offset = offset + NVME_TCP_HEADER_SIZE;
+
+    switch (packet_type) {
+    case nvme_tcp_icreq:
+        dissect_nvme_tcp_icreq(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree);
+        proto_item_set_len(ti, hlen);
+        break;
+    case nvme_tcp_icresp:
+        dissect_nvme_tcp_icresp(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree);
+        proto_item_set_len(ti, hlen);
+        break;
+    case nvme_tcp_cmd:
+    case nvme_tcp_rsp:
+    case nvme_tcp_c2h_data:
+    case nvme_tcp_h2c_data:
+    case nvme_tcp_r2t:
+    case nvme_tcp_h2c_term:
+    case nvme_tcp_c2h_term:
+    default:
+        proto_tree_add_item(nvme_tcp_tree, hf_nvme_tcp_unknown_data, tvb,
+                offset, plen, ENC_NA);
+        break;
+    }
+
+    offset += plen;
     return tvb_reported_length(tvb);
 }
 
@@ -181,6 +273,41 @@ void proto_register_nvme_tcp(void) {
        { &hf_nvme_tcp_plen,
            { "Packet Length", "nvme-tcp.plen",
             FT_UINT32, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+       { &hf_nvme_tcp_icreq,
+           { "ICReq", "nvme-tcp.icreq",
+             FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+       { &hf_nvme_tcp_icreq_pfv,
+           { "Pdu Version Format", "nvme-tcp.icreq.pfv",
+            FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+       { &hf_nvme_tcp_icreq_maxr2t,
+           { "Maximum r2ts per request", "nvme-tcp.icreq.maxr2t",
+             FT_UINT32, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+       { &hf_nvme_tcp_icreq_hpda,
+           { "Host Pdu data alignment", "nvme-tcp.icreq.hpda",
+             FT_UINT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+       { &hf_nvme_tcp_icreq_digest,
+           { "Digest Types Enabled", "nvme-tcp.icreq.digest",
+             FT_UINT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+       { &hf_nvme_tcp_icresp,
+           { "ICResp", "nvme-tcp.icresp",
+             FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+       { &hf_nvme_tcp_icresp_pfv,
+           { "Pdu Version Format", "nvme-tcp.icresp.pfv",
+             FT_UINT16, BASE_DEC, NULL, 0x0,
+             NULL, HFILL } },
+       { &hf_nvme_tcp_icresp_cpda,
+           { "Controller Pdu data alignment", "nvme-tcp.icresp.cpda",
+             FT_UINT32, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+       { &hf_nvme_tcp_icresp_digest,
+           { "Digest types enabled", "nvme-tcp.icresp.digest",
+             FT_UINT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+       { &hf_nvme_tcp_icresp_maxdata,
+           { "Maximum data capsules per r2t supported",
+                   "nvme-tcp.icresp.maxdata",
+             FT_UINT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+       { &hf_nvme_tcp_unknown_data,
+           { "Unknown Data", "nvme-tcp.unknown_data",
+             FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
        { &hf_nvme_fabrics_cmd_qid,
            { "Cmd Qid", "nvme-tcp.cmd.qid",
              FT_UINT16, BASE_HEX, NULL, 0x0,
