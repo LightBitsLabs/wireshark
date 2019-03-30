@@ -202,6 +202,7 @@ static int hf_nvme_fabrics_cmd_prop_attr_set_rsvd3 = -1;
 
 /* tracking Cmd and its respective CQE */
 static int hf_nvme_fabrics_cmd_pkt = -1;
+static int hf_nvme_tcp_cmd_pkt = -1;
 static int hf_nvme_fabrics_cqe_pkt = -1;
 static int hf_nvme_fabrics_cmd_latency = -1;
 static int hf_nvme_fabrics_cmd_qid = -1;
@@ -715,6 +716,9 @@ dissect_nvme_tcp_c2h_data(tvbuff_t *tvb,
         }
     }
 
+    nvme_publish_data_pdu_to_cmd_link(nvme_tcp_tree, tvb,
+            hf_nvme_tcp_cmd_pkt, &cmd_ctx->n_cmd_ctx);
+
     if (cmd_ctx->n_cmd_ctx.fabric) {
         cmd_string = val_to_str(cmd_ctx->fctype, nvme_fabrics_cmd_type_vals,
                 "Unknown FcType");
@@ -779,6 +783,9 @@ dissect_nvme_tcp_h2c_data(tvbuff_t *tvb,
         if (!cmd_ctx)
             goto not_found;
     }
+
+    nvme_publish_data_pdu_to_cmd_link(nvme_tcp_tree, tvb,
+                hf_nvme_tcp_cmd_pkt, &cmd_ctx->n_cmd_ctx);
 
     /* fabrics commands should not have h2cdata*/
     if (cmd_ctx->n_cmd_ctx.fabric) {
@@ -1215,6 +1222,10 @@ void proto_register_nvme_tcp(void) {
            { "Fabric Cmd in", "nvme-tcp.cmd_pkt",
              FT_FRAMENUM, BASE_NONE, NULL, 0,
              "The Cmd for this transaction is in this frame", HFILL } },
+       { &hf_nvme_tcp_cmd_pkt,
+            { "Cmd in", "nvme-tcp.cmd_pkt",
+              FT_FRAMENUM, BASE_NONE, NULL, 0,
+              "The Cmd for this transaction is in this frame", HFILL } },
        { &hf_nvme_fabrics_cqe_pkt,
            { "Fabric Cqe in", "nvme-tcp.cqe_pkt",
              FT_FRAMENUM, BASE_NONE, NULL, 0,

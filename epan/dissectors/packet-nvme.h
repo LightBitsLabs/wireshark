@@ -52,6 +52,10 @@ void
 nvme_publish_cmd_to_cqe_link(proto_tree *cmd_tree, tvbuff_t *cqe_tvb,
                              int hf_index, struct nvme_cmd_ctx *cmd_ctx);
 
+void
+nvme_publish_data_pdu_to_cmd_link(proto_tree *pdu_tree, tvbuff_t *nvme_tvb,
+                           int hf_index, struct nvme_cmd_ctx *cmd_ctx);
+
 void nvme_update_cmd_end_info(packet_info *pinfo, struct nvme_cmd_ctx *cmd_ctx);
 
 void
