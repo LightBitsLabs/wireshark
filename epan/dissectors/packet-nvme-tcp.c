@@ -47,6 +47,7 @@ static dissector_handle_t nvmet_tcp_handle;
 #define NVME_TCP_HEADER_SIZE 8
 #define PDU_LEN_OFFSET_FROM_HEADER 4
 static range_t *gPORT_RANGE;
+#define NVME_TCP_DATA_PDU_SIZE 24
 
 enum nvme_tcp_pdu_type {
     nvme_tcp_icreq = 0x0,
@@ -214,7 +215,12 @@ static int hf_nvme_fabrics_cqe_connect_authreq = -1;
 static int hf_nvme_fabrics_cqe_connect_rsvd = -1;
 static int hf_nvme_fabrics_cqe_prop_set_rsvd = -1;
 
+/* Data response fields */
+static int hf_nvme_tcp_data_pdu = -1;
 static int hf_nvme_tcp_pdu_ttag = -1;
+static int hf_nvme_tcp_data_pdu_data_offset = -1;
+static int hf_nvme_tcp_data_pdu_data_length = -1;
+static int hf_nvme_tcp_data_pdu_data_resvd = -1;
 
 static gint ett_nvme_tcp = -1;
 
@@ -622,6 +628,172 @@ dissect_nvme_fabric_cqe(tvbuff_t *nvme_tvb,
             offset + 14, 2, ENC_LITTLE_ENDIAN);
 }
 
+static guint32
+dissect_nvme_tcp_data_pdu(tvbuff_t *tvb,
+                          packet_info *pinfo,
+                          int offset,
+                          proto_tree *tree) {
+    guint32 data_length;
+    proto_item *tf;
+    proto_item *data_tree;
+
+    col_set_str(pinfo->cinfo, COL_PROTOCOL, "NVMe");
+
+    tf = proto_tree_add_item(tree, hf_nvme_tcp_data_pdu, tvb, offset,
+            NVME_TCP_DATA_PDU_SIZE - NVME_TCP_HEADER_SIZE, ENC_NA);
+    data_tree = proto_item_add_subtree(tf, ett_nvme_tcp);
+
+    proto_tree_add_item(data_tree, hf_nvme_fabrics_cmd_cid, tvb, offset, 2,
+            ENC_LITTLE_ENDIAN);
+
+    proto_tree_add_item(data_tree, hf_nvme_tcp_pdu_ttag, tvb, offset + 2, 2,
+            ENC_LITTLE_ENDIAN);
+
+    proto_tree_add_item(data_tree, hf_nvme_tcp_data_pdu_data_offset, tvb,
+            offset + 4, 4, ENC_LITTLE_ENDIAN);
+
+    data_length = tvb_get_guint32(tvb, offset + 8, ENC_LITTLE_ENDIAN);
+    proto_tree_add_item(data_tree, hf_nvme_tcp_data_pdu_data_length, tvb,
+            offset + 8, 4, ENC_LITTLE_ENDIAN);
+
+    proto_tree_add_item(data_tree, hf_nvme_tcp_data_pdu_data_resvd, tvb,
+            offset + 12, 4, ENC_NA);
+
+    return data_length;
+}
+
+static void
+dissect_nvme_tcp_c2h_data(tvbuff_t *tvb,
+                          packet_info *pinfo,
+                          proto_tree *root_tree,
+                          proto_tree *nvme_tcp_tree,
+                          proto_item *nvme_tcp_ti,
+                          struct nvme_tcp_q_ctx *queue,
+                          int offset,
+                          struct tcpinfo *tcpinfo)
+{
+    struct nvme_tcp_cmd_ctx *cmd_ctx;
+    guint32 cmd_id;
+    guint32 data_length;
+    tvbuff_t *nvme_data;
+    guint32 data_key;
+    const gchar *cmd_string;
+
+    cmd_id = tvb_get_guint16(tvb, offset, ENC_LITTLE_ENDIAN);
+    data_length = dissect_nvme_tcp_data_pdu(tvb, pinfo, offset, nvme_tcp_tree);
+
+    /* This can identify our packet uniquely  */
+    data_key = tcpinfo->seq + offset;
+    if (!PINFO_FD_VISITED(pinfo)) {
+        cmd_ctx = (struct nvme_tcp_cmd_ctx*) nvme_lookup_cmd_in_pending_list(
+                &queue->n_q_ctx, cmd_id);
+        if (!cmd_ctx) {
+            goto not_found;
+        }
+
+        /* In order to later lookup for command context lets add this command
+         * to data responses */
+        cmd_ctx->n_cmd_ctx.data_resp_pkt_num = pinfo->num;
+        nvme_add_data_response(&queue->n_q_ctx, &cmd_ctx->n_cmd_ctx, data_key);
+    } else {
+        cmd_ctx = (struct nvme_tcp_cmd_ctx*) nvme_lookup_data_response(pinfo,
+                &queue->n_q_ctx, data_key);
+        if (!cmd_ctx) {
+            goto not_found;
+        }
+    }
+
+    if (cmd_ctx->n_cmd_ctx.fabric) {
+        cmd_string = val_to_str(cmd_ctx->fctype, nvme_fabrics_cmd_type_vals,
+                "Unknown FcType");
+        proto_item_append_text(nvme_tcp_ti,
+                ", C2HData Fabrics Type: %s (0x%02x), Cmd ID: 0x%04x, Len: %u",
+                cmd_string, cmd_ctx->fctype, cmd_id, data_length);
+    } else {
+        cmd_string = nvme_get_opcode_string(cmd_ctx->n_cmd_ctx.opcode,
+                queue->n_q_ctx.qid);
+        proto_item_append_text(nvme_tcp_ti,
+                ", C2HData Opcode: %s (0x%02x), Cmd ID: 0x%04x, Len: %u",
+                cmd_string, cmd_ctx->n_cmd_ctx.opcode, cmd_id, data_length);
+    }
+
+    nvme_data = tvb_new_subset_remaining(tvb, NVME_TCP_DATA_PDU_SIZE);
+
+    dissect_nvme_data_response(nvme_data, pinfo, root_tree, &queue->n_q_ctx,
+            &cmd_ctx->n_cmd_ctx, data_length);
+
+    return;
+not_found:
+    proto_tree_add_item(root_tree, hf_nvme_tcp_unknown_data, tvb, offset + 16,
+            data_length, ENC_NA);
+}
+
+static void
+dissect_nvme_tcp_h2c_data(tvbuff_t *tvb,
+                          packet_info *pinfo,
+                          proto_tree *root_tree,
+                          proto_tree *nvme_tcp_tree,
+                          proto_item *nvme_tcp_ti,
+                          struct nvme_tcp_q_ctx *queue,
+                          int offset,
+                          struct tcpinfo *tcpinfo)
+{
+    struct nvme_tcp_cmd_ctx *cmd_ctx;
+    guint16 cmd_id;
+    guint32 data_length;
+    guint32 data_key;
+    tvbuff_t *nvme_data;
+    const gchar *cmd_string;
+
+    cmd_id = tvb_get_guint16(tvb, offset, ENC_LITTLE_ENDIAN);
+    data_length = dissect_nvme_tcp_data_pdu(tvb, pinfo, offset, nvme_tcp_tree);
+
+    /* This can identify our packet uniquely  */
+    data_key = tcpinfo->seq + offset;
+    if (!PINFO_FD_VISITED(pinfo)) {
+        cmd_ctx = (struct nvme_tcp_cmd_ctx*) nvme_lookup_cmd_in_pending_list(
+                &queue->n_q_ctx, cmd_id);
+        if (!cmd_ctx)
+            goto not_found;
+
+        /* Fill this for "adding data request call,
+         * this will be the key to fetch data request later */
+        cmd_ctx->n_cmd_ctx.remote_key = data_key;
+        nvme_add_data_request(pinfo, &queue->n_q_ctx, &cmd_ctx->n_cmd_ctx,
+                (void*) cmd_ctx);
+    } else {
+        cmd_ctx = (struct nvme_tcp_cmd_ctx*) nvme_lookup_data_request(
+                &queue->n_q_ctx, data_key);
+        if (!cmd_ctx)
+            goto not_found;
+    }
+
+    /* fabrics commands should not have h2cdata*/
+    if (cmd_ctx->n_cmd_ctx.fabric) {
+        cmd_string = val_to_str(cmd_ctx->fctype, nvme_fabrics_cmd_type_vals,
+                "Unknown FcType");
+        proto_item_append_text(nvme_tcp_ti,
+                ", H2CData Fabrics Type: %s (0x%02x), Cmd ID: 0x%04x, Len: %u",
+                cmd_string, cmd_ctx->fctype, cmd_id, data_length);
+        goto not_found;
+    }
+
+    cmd_string = nvme_get_opcode_string(cmd_ctx->n_cmd_ctx.opcode,
+            queue->n_q_ctx.qid);
+    proto_item_append_text(nvme_tcp_ti,
+            ", H2CData Opcode: %s (0x%02x), Cmd ID: 0x%04x, Len: %u",
+            cmd_string, cmd_ctx->n_cmd_ctx.opcode, cmd_id, data_length);
+
+    nvme_data = tvb_new_subset_remaining(tvb, NVME_TCP_DATA_PDU_SIZE);
+    dissect_nvme_data_response(nvme_data, pinfo, root_tree, &queue->n_q_ctx,
+            &cmd_ctx->n_cmd_ctx, data_length);
+    return;
+not_found:
+    proto_tree_add_item(root_tree, hf_nvme_tcp_unknown_data, tvb, offset + 16,
+            data_length, ENC_NA);
+
+}
+
 static void
 dissect_nvme_tcp_cqe(tvbuff_t *tvb,
                      packet_info *pinfo,
@@ -722,8 +894,9 @@ static int
 dissect_nvme_tcp_pdu(tvbuff_t *tvb,
                      packet_info *pinfo,
                      proto_tree *tree,
-                     void* data _U_)
+                     void* data)
 {
+    struct tcpinfo *tcpinfo = (struct tcpinfo *) data;
     conversation_t *conversation;
     struct nvme_tcp_q_ctx *q_ctx;
     proto_item *ti;
@@ -797,7 +970,14 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb,
         proto_item_set_len(ti, NVME_TCP_HEADER_SIZE);
         break;
     case nvme_tcp_c2h_data:
+        dissect_nvme_tcp_c2h_data(tvb, pinfo, tree, nvme_tcp_tree, ti, q_ctx,
+                nvme_tcp_pdu_offset, tcpinfo);
+        proto_item_set_len(ti, NVME_TCP_DATA_PDU_SIZE);
+        break;
     case nvme_tcp_h2c_data:
+        dissect_nvme_tcp_h2c_data(tvb, pinfo, tree, nvme_tcp_tree, ti, q_ctx,
+                nvme_tcp_pdu_offset, tcpinfo);
+        proto_item_set_len(ti, NVME_TCP_DATA_PDU_SIZE);
         break;
     case nvme_tcp_r2t:
         dissect_nvme_tcp_r2t(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree);
@@ -1023,10 +1203,25 @@ void proto_register_nvme_tcp(void) {
            { "Cmd Qid", "nvme-tcp.cmd.qid",
              FT_UINT16, BASE_HEX, NULL, 0x0,
              "Qid on which command is issued", HFILL } },
+      /* NVMe TCP data response */
+      { &hf_nvme_tcp_data_pdu,
+           { "NVMe/TCP Data PDU", "nvme-tcp.data",
+             FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
       { &hf_nvme_tcp_pdu_ttag,
            { "Transfer Tag", "nvme-tcp.ttag",
              FT_UINT16, BASE_HEX, NULL, 0x0,
              "Transfer tag (controller generated)", HFILL } },
+      { &hf_nvme_tcp_data_pdu_data_offset,
+           { "Data Offset", "nvme-tcp.data.offset",
+             FT_UINT32, BASE_DEC, NULL, 0x0,
+             "Offset from the start of the command data", HFILL } },
+      { &hf_nvme_tcp_data_pdu_data_length,
+           { "Data Length", "nvme-tcp.data.length",
+             FT_UINT32, BASE_DEC, NULL, 0x0,
+             "Length of the data stream", HFILL } },
+      { &hf_nvme_tcp_data_pdu_data_resvd,
+           { "Reserved", "nvme-tcp.data.rsvd",
+             FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
       /* NVMEe TCP R2T pdu */
       { &hf_nvme_tcp_r2t_pdu,
            { "R2T", "nvme-tcp.r2t",
