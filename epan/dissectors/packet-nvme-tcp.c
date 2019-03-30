@@ -204,6 +204,10 @@ static int hf_nvme_fabrics_cmd_prop_attr_set_4B_value_rsvd = -1;
 static int hf_nvme_fabrics_cmd_prop_attr_set_8B_value = -1;
 static int hf_nvme_fabrics_cmd_prop_attr_set_rsvd3 = -1;
 
+/* tracking Cmd and its respective CQE */
+static int hf_nvme_fabrics_cmd_pkt = -1;
+static int hf_nvme_fabrics_cqe_pkt = -1;
+static int hf_nvme_fabrics_cmd_latency = -1;
 static int hf_nvme_fabrics_cmd_qid = -1;
 
 /* NVMe Fabric CQE */
@@ -455,6 +459,9 @@ dissect_nvme_fabric_cmd(tvbuff_t *nvme_tvb,
             offset, 1, ENC_NA);
     proto_item_append_text(opc_item, "%s", " Fabric Cmd");
 
+    nvme_publish_cmd_to_cqe_link(cmd_tree, nvme_tvb, hf_nvme_fabrics_cqe_pkt,
+            &cmd_ctx->n_cmd_ctx);
+
     proto_tree_add_item(cmd_tree, hf_nvme_fabrics_cmd_rsvd1, nvme_tvb,
             offset + 1, 1, ENC_NA);
 
@@ -617,6 +624,11 @@ dissect_nvme_fabric_cqe(tvbuff_t *nvme_tvb,
     col_add_fstr(pinfo->cinfo, COL_INFO, "Fabrics %s Response", fctype_cmd);
 
     cqe_tree = proto_item_add_subtree(ti, ett_nvme_tcp);
+
+    nvme_publish_cqe_to_cmd_link(cqe_tree, nvme_tvb, hf_nvme_fabrics_cmd_pkt,
+            &cmd_ctx->n_cmd_ctx);
+    nvme_publish_cmd_latency(cqe_tree, &cmd_ctx->n_cmd_ctx,
+            hf_nvme_fabrics_cmd_latency);
 
     dissect_nvme_fabrics_cqe_status_8B(cqe_tree, nvme_tvb, cmd_ctx, offset);
 
@@ -1203,6 +1215,18 @@ void proto_register_nvme_tcp(void) {
        { &hf_nvme_fabrics_cqe_prop_set_rsvd,
            { "Reserved", "nvme-tcp.cqe.prop_set.rsvd",
              FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+       { &hf_nvme_fabrics_cmd_pkt,
+           { "Fabric Cmd in", "nvme-tcp.cmd_pkt",
+             FT_FRAMENUM, BASE_NONE, NULL, 0,
+             "The Cmd for this transaction is in this frame", HFILL } },
+       { &hf_nvme_fabrics_cqe_pkt,
+           { "Fabric Cqe in", "nvme-tcp.cqe_pkt",
+             FT_FRAMENUM, BASE_NONE, NULL, 0,
+             "The Cqe for this transaction is in this frame", HFILL } },
+       { &hf_nvme_fabrics_cmd_latency,
+           { "Cmd Latency", "nvme-tcp.cmd_latency",
+             FT_DOUBLE, BASE_NONE, NULL, 0x0,
+             "The time between the command and completion, in usec", HFILL } },
        { &hf_nvme_fabrics_cmd_qid,
            { "Cmd Qid", "nvme-tcp.cmd.qid",
              FT_UINT16, BASE_HEX, NULL, 0x0,
