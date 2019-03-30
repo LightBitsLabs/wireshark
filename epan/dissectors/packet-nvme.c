@@ -612,8 +612,7 @@ dissect_nvme_data_response(tvbuff_t *nvme_tvb, packet_info *pinfo, proto_tree *r
             break;
         }
     }
-    col_add_lstr(pinfo->cinfo, COL_INFO, "NVMe ", str_opcode, ": Data",
-                 COL_ADD_LSTR_TERMINATOR);
+    col_append_sep_fstr(pinfo->cinfo, COL_INFO, " | ", "NVMe %s: Data", str_opcode);
 }
 
 void
