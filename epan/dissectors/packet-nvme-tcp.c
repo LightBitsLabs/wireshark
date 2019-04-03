@@ -125,6 +125,45 @@ static const value_string prop_offset_tbl[] = {
     { 0, NULL }
 };
 
+enum nvme_tcp_fatal_error_status {
+    NVME_TCP_FES_INVALID_PDU_HDR        = 0x01,
+    NVME_TCP_FES_PDU_SEQ_ERR            = 0x02,
+    NVME_TCP_FES_HDR_DIGEST_ERR         = 0x03,
+    NVME_TCP_FES_DATA_OUT_OF_RANGE      = 0x04,
+    NVME_TCP_FES_R2T_LIMIT_EXCEEDED     = 0x05,
+    NVME_TCP_FES_DATA_LIMIT_EXCEEDED    = 0x05,
+    NVME_TCP_FES_UNSUPPORTED_PARAM      = 0x06,
+};
+
+static const range_string nvme_tcp_termreq_fes[] = {
+    { 0x0,  0x0,    "Reserved" },
+    { 0x1,  0x1,    "Invalid PDU Header Field" },
+    { 0x2,  0x2,    "PDU Sequence Error" },
+    { 0x3,  0x3,    "Header Digest Error" },
+    { 0x4,  0x4,    "Data Transfer Out of Range" },
+    { 0x5,  0x5,    "R2T Limit Exceeded" },
+    { 0x6,  0x6,    "Unsupported Parameter" },
+    { 0x7,  0xffff, "Reserved" },
+    { 0x00, 0x00,    NULL }
+};
+
+enum nvme_tcp_fatal_error_info {
+    NVME_TCP_FEI_INVALID_PDU_HDR        = 0x01,
+    NVME_TCP_FEI_HDR_DIGEST_ERR         = 0x03,
+    NVME_TCP_FEI_UNSUPPORTED_PARAM      = 0x06,
+};
+
+static const range_string nvme_tcp_termreq_fei[] = {
+    { 0x0,  0x0,        "Reserved" },
+    { 0x1,  0x1,        "Invalid PDU Header Field" },
+    { 0x2,  0x2,        "Reserved" },
+    { 0x3,  0x3,        "Header Digest Error" },
+    { 0x4,  0x5,        "Reserved" },
+    { 0x6,  0x6,        "Unsupported Parameter Field Offset" },
+    { 0x7,  0xffffffff, "Reserved" },
+    { 0x00, 0x00,        NULL },
+};
+
 enum nvme_tcp_digest_option {
     NVME_TCP_HDR_DIGEST_ENABLE = (1 << 0),
     NVME_TCP_DATA_DIGEST_ENABLE = (1 << 1),
@@ -262,6 +301,12 @@ static int hf_nvme_tcp_pdu_ttag = -1;
 static int hf_nvme_tcp_data_pdu_data_offset = -1;
 static int hf_nvme_tcp_data_pdu_data_length = -1;
 static int hf_nvme_tcp_data_pdu_data_resvd = -1;
+
+/* NVMe/TCP termination PDU`s*/
+static int hf_nvme_tcp_term_pdu = -1;
+static int hf_nvme_tcp_term_fes = -1;
+static int hf_nvme_tcp_term_fei = -1;
+static int hf_nvme_tcp_term_rsvd = -1;
 
 static gint ett_nvme_tcp = -1;
 
@@ -954,6 +999,46 @@ dissect_nvme_tcp_r2t(tvbuff_t *tvb,
             ENC_NA);
 }
 
+
+static void
+dissect_nvme_tcp_term_pdu(tvbuff_t *tvb,
+                          int offset,
+                          proto_tree *tree)
+{
+    proto_item *tf;
+    proto_item *term_tree;
+
+    tf = proto_tree_add_item(tree, hf_nvme_tcp_term_pdu, tvb, offset, -1,
+               ENC_NA);
+    term_tree = proto_item_add_subtree(tf, ett_nvme_tcp);
+    proto_tree_add_item(term_tree, hf_nvme_tcp_term_fes, tvb, offset, 2,
+                ENC_LITTLE_ENDIAN);
+    proto_tree_add_item(term_tree, hf_nvme_tcp_term_fei, tvb, offset + 2, 4,
+            ENC_LITTLE_ENDIAN);
+    proto_tree_add_item(term_tree, hf_nvme_tcp_term_rsvd, tvb, offset + 6, 8,
+            ENC_NA);
+}
+
+static void
+dissect_nvme_tcp_h2c_term_pdu(tvbuff_t *tvb,
+                              packet_info *pinfo,
+                              int offset,
+                              proto_tree *tree)
+{
+    col_append_sep_fstr(pinfo->cinfo, COL_INFO, " | ", "H2CTermReq");
+    dissect_nvme_tcp_term_pdu(tvb, offset, tree);
+}
+
+static void
+dissect_nvme_tcp_c2h_term_pdu(tvbuff_t *tvb,
+                              packet_info *pinfo,
+                              int offset,
+                              proto_tree *tree)
+{
+    col_append_sep_fstr(pinfo->cinfo, COL_INFO, " | ", "C2HTermReq");
+    dissect_nvme_tcp_term_pdu(tvb, offset, tree);
+}
+
 static int
 dissect_nvme_tcp_pdu(tvbuff_t *tvb,
                      packet_info *pinfo,
@@ -1096,7 +1181,11 @@ dissect_nvme_tcp_pdu(tvbuff_t *tvb,
         dissect_nvme_tcp_r2t(tvb, pinfo, nvme_tcp_pdu_offset, nvme_tcp_tree);
         break;
     case nvme_tcp_h2c_term:
+        dissect_nvme_tcp_h2c_term_pdu(tvb, pinfo, offset, nvme_tcp_tree);
+        break;
     case nvme_tcp_c2h_term:
+        dissect_nvme_tcp_c2h_term_pdu(tvb, pinfo, offset, nvme_tcp_tree);
+        break;
     default:
         proto_tree_add_item(nvme_tcp_tree, hf_nvme_tcp_unknown_data, tvb,
                 offset, plen, ENC_NA);
@@ -1398,7 +1487,22 @@ void proto_register_nvme_tcp(void) {
              "Length of the data stream", HFILL } },
       { &hf_nvme_tcp_r2t_resvd,
            { "Reserved", "nvme-tcp.r2t.rsvd",
-             FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+             FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+      /* NVMe/TCP termination PDU`s*/
+      { &hf_nvme_tcp_term_pdu,
+           { "R2T", "nvme-tcp.term",
+             FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+      { &hf_nvme_tcp_term_fes,
+           { "Fatal Error Status", "nvme-tcp.term.fes",
+             FT_UINT16, BASE_HEX|BASE_RANGE_STRING, RVALS(nvme_tcp_termreq_fes)
+             , 0x0, NULL, HFILL } },
+      { &hf_nvme_tcp_term_fei,
+           { "Fatal Error Status", "nvme-tcp.term.fei",
+              FT_UINT32, BASE_HEX|BASE_RANGE_STRING, RVALS(nvme_tcp_termreq_fei)
+              , 0x0, NULL, HFILL } },
+      { &hf_nvme_tcp_term_rsvd,
+           { "Reserved", "nvme-tcp.term.rsvd",
+             FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
     };
 
     static gint *ett[] = {
